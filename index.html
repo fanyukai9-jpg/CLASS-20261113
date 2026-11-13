@@ -14,7 +14,7 @@
     @media(max-width:360px){.page{width:calc(100% - 24px)}.card{padding-right:15px;padding-left:15px}.event{grid-template-columns:49px 12px minmax(0,1fr);gap:9px}.status{padding-right:7px;padding-left:7px;font-size:9px}.todo-form{grid-template-columns:minmax(0,1fr)}.todo-form .add-button{width:100%}.day-count{font-size:11px}}
     @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition-duration:.01ms!important}}
     .event-edit-fields{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:8px}.todo-edit-fields{min-width:0;flex:1;display:grid;gap:7px}.event-edit-title{grid-column:1/-1}.edit-field{min-width:0;width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px}.save-button{color:var(--green);background:var(--pale)}
-    .auth-area{display:flex;align-items:center;gap:10px}.auth-user{color:var(--muted);font-size:12px}.google-button,.signout-button{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--ink);font-size:12px;font-weight:600;cursor:pointer}.google-button:hover,.signout-button:hover{border-color:#b7c3b0;background:var(--pale)}.auth-error{margin:10px 0 0;color:#a05d4c;font-size:12px}@media(max-width:680px){.topbar{align-items:flex-start}.auth-area{flex-wrap:wrap;justify-content:flex-end}.auth-user{max-width:150px;overflow-wrap:anywhere}}
+    .auth-area{display:flex;align-items:center;gap:10px}.auth-user{color:var(--muted);font-size:12px}.google-button,.line-button,.signout-button{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--ink);font-size:12px;font-weight:600;cursor:pointer}.google-button:hover,.signout-button:hover{border-color:#b7c3b0;background:var(--pale)}.line-button{border-color:#06c755;background:#06c755;color:white}.line-button:hover{border-color:#05b34c;background:#05b34c}.google-button:disabled,.line-button:disabled{cursor:wait;opacity:.65}.auth-error{margin:10px 0 0;color:#a05d4c;font-size:12px}@media(max-width:680px){.topbar{align-items:flex-start}.auth-area{flex-wrap:wrap;justify-content:flex-end}.auth-user{max-width:150px;overflow-wrap:anywhere}}
   </style>
 </head>
 
@@ -25,6 +25,7 @@
       <div class="auth-area">
         <span class="auth-user" id="auth-user" aria-live="polite"></span>
         <button class="google-button" id="google-sign-in" type="button">使用 Google 登入</button>
+        <button class="line-button" id="line-sign-in" type="button">使用 LINE 登入</button>
         <button class="signout-button" id="sign-out" type="button" hidden>登出</button>
       </div>
     </header>
@@ -61,7 +62,7 @@
   </main>
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-app.js";
-    import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-auth.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithCustomToken, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-auth.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyDJjPexEMLjq5_NjMbpCzxvKeYnAtEf2h4",
@@ -72,34 +73,68 @@
       appId: "1:813757781225:web:928166f9944a1090564c78"
     };
     const auth = getAuth(initializeApp(firebaseConfig));
-    const provider = new GoogleAuthProvider();
+    const googleProvider = new GoogleAuthProvider();
     const signInButton = document.getElementById("google-sign-in");
+    const lineSignInButton = document.getElementById("line-sign-in");
     const signOutButton = document.getElementById("sign-out");
     const userLabel = document.getElementById("auth-user");
     const authError = document.getElementById("auth-error");
+    const signInButtons = [signInButton, lineSignInButton];
 
-    signInButton.addEventListener("click", async () => {
+    const signIn = async (provider, providerName) => {
       authError.hidden = true;
-      signInButton.disabled = true;
+      signInButtons.forEach(item => { item.disabled = true; });
       try {
         await signInWithPopup(auth, provider);
       } catch (error) {
         if (error.code !== "auth/popup-closed-by-user" && error.code !== "auth/cancelled-popup-request") {
-          authError.textContent = error.code === "auth/unauthorized-domain"
-            ? "此網站網域尚未加入 Firebase 授權網域，請至 Authentication 設定加入後再試。"
-            : `Google 登入失敗，請稍後再試。(${error.code || "unknown"})`;
+          if (error.code === "auth/unauthorized-domain") {
+            authError.textContent = "此網站網域尚未加入 Firebase 授權網域，請至 Authentication 設定加入後再試。";
+          } else {
+            authError.textContent = `${providerName} 登入失敗，請稍後再試。(${error.code || "unknown"})`;
+          }
           authError.hidden = false;
         }
       } finally {
-        signInButton.disabled = false;
+        signInButtons.forEach(item => { item.disabled = false; });
       }
+    };
+
+    signInButton.addEventListener("click", () => signIn(googleProvider, "Google"));
+    lineSignInButton.addEventListener("click", () => {
+      if (["localhost", "127.0.0.1"].includes(window.location.hostname) && window.location.port !== "5000") {
+        authError.textContent = "這個本機預覽沒有 LINE 登入後端。請部署到 Firebase Hosting，或使用 Firebase Hosting Emulator。";
+        authError.hidden = false;
+        return;
+      }
+      window.location.assign("/api/line/login");
     });
     signOutButton.addEventListener("click", () => signOut(auth));
+
+    const params = new URLSearchParams(window.location.search);
+    const lineError = params.get("lineError");
+    if (lineError) window.history.replaceState({}, "", window.location.pathname);
+
+    const hashParams = new URLSearchParams(window.location.hash.slice(1));
+    const lineToken = hashParams.get("lineToken");
+    if (lineToken) {
+      window.history.replaceState({}, "", window.location.pathname + window.location.search);
+      signInWithCustomToken(auth, lineToken).catch(error => {
+        authError.textContent = `LINE 登入失敗，請稍後再試。(${error.code || "unknown"})`;
+        authError.hidden = false;
+      });
+    }
+
     onAuthStateChanged(auth, user => {
-      userLabel.textContent = user ? `已登入：${user.displayName || user.email || "Google 使用者"}` : "";
-      signInButton.hidden = Boolean(user);
+      userLabel.textContent = user ? `已登入：${user.displayName || user.email || "使用者"}` : "";
+      signInButtons.forEach(button => { button.hidden = Boolean(user); });
       signOutButton.hidden = !user;
-      if (!user) authError.hidden = true;
+      if (!user && lineError) {
+        authError.textContent = lineError === "cancelled" ? "已取消 LINE 登入。" : "LINE 登入失敗，請稍後再試。";
+        authError.hidden = false;
+      } else if (!user && !lineError) {
+        authError.hidden = true;
+      }
     });
   </script>
   <script>
