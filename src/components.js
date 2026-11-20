@@ -1,7 +1,7 @@
 import { formatDate, formatTime } from './dates.js';
 import { escapeHTML } from './ui.js';
 
-export const priorityLabels = { p1: '緊急', p2: '高', p3: '一般', p4: '低' };
+export const priorityLabels = { p1: '緊急', p2: '高', p3: '中', p4: '低', none: '無優先級' };
 export const statusLabels = { todo: '待辦', 'in-progress': '進行中', completed: '已完成' };
 
 export function renderTask(task, data, options = {}) {
@@ -14,7 +14,7 @@ export function renderTask(task, data, options = {}) {
   return `<article class="task-row ${options.home ? 'is-home-task' : ''} ${options.compact ? 'is-compact' : ''} ${task.status === 'completed' ? 'is-complete' : ''} ${task.dueDate && task.dueDate < new Date().toISOString().slice(0, 10) && task.status !== 'completed' ? 'is-overdue' : ''}" ${options.home ? '' : 'draggable="true"'} data-task-id="${escapeHTML(task.id)}">
     ${options.home ? '' : `<input class="task-select" type="checkbox" aria-label="選取${escapeHTML(task.title)}" data-select-task="${escapeHTML(task.id)}">`}
     <button class="task-check" type="button" aria-label="${task.status === 'completed' ? '標記未完成' : '完成任務'}" data-action="toggle-task" data-id="${escapeHTML(task.id)}" aria-pressed="${task.status === 'completed'}"><span></span></button>
-    <div class="task-body"><div class="task-title-line"><button class="task-title" type="button" data-action="task-detail" data-id="${escapeHTML(task.id)}">${escapeHTML(task.title)}</button>${options.home ? '' : `<span class="priority-dot ${task.priority}" title="${priorityLabels[task.priority] || '一般'}"></span>`}${task.status === 'in-progress' ? '<span class="status-pill">進行中</span>' : ''}</div>
+    <div class="task-body"><div class="task-title-line"><button class="task-title" type="button" data-action="task-detail" data-id="${escapeHTML(task.id)}">${escapeHTML(task.title)}</button><span class="priority-dot ${task.priority || 'none'}" title="${priorityLabels[task.priority] || '無優先級'}" aria-label="${priorityLabels[task.priority] || '無優先級'}"></span>${task.status === 'in-progress' ? '<span class="status-pill">進行中</span>' : ''}</div>
       <div class="task-meta">${date}${time}${!options.home && project ? `<span class="project-chip"><i style="--project-color:${escapeHTML(project.color || '#6674b8')}"></i>${escapeHTML(project.name)}</span>` : ''}${!options.home && subtaskCount ? `<span class="task-meta-item">子任務 ${doneCount}/${subtaskCount}</span>` : ''}${options.home ? (task.description ? `<span class="task-hint">${escapeHTML(task.description)}</span>` : '') : tags}</div>
     </div>
     <div class="task-actions">${options.home ? '' : `<button class="icon-button" type="button" aria-label="編輯任務" data-action="task-edit" data-id="${escapeHTML(task.id)}">${icon('edit')}</button>`}<button class="icon-button" type="button" aria-label="更多操作" data-action="task-menu" data-id="${escapeHTML(task.id)}">${icon('more')}</button></div>
@@ -42,6 +42,7 @@ export function icon(name) {
 
 export function renderTaskForm(task, data, options = {}) {
   const projectOptions = data.projects.map(project => `<option value="${escapeHTML(project.id)}" ${(task?.projectId || options.projectId) === project.id ? 'selected' : ''}>${escapeHTML(project.name)}</option>`).join('');
+  const listOptions = (data.lists || []).map(list => `<option value="${escapeHTML(list.id)}" ${(task?.listId || options.listId) === list.id ? 'selected' : ''}>${escapeHTML(list.name)}</option>`).join('');
   const subtasks = (task?.subtasks || []).map(item => item.title).join('\n');
   return `<form class="form-grid task-form" data-form="task">
     <input type="hidden" name="id" value="${escapeHTML(task?.id || '')}">
@@ -50,7 +51,8 @@ export function renderTaskForm(task, data, options = {}) {
     <label class="field"><span>截止日期</span><input type="date" name="dueDate" value="${escapeHTML(task?.dueDate || options.dueDate || '')}"></label>
     <label class="field"><span>開始時間</span><input type="time" name="startTime" value="${escapeHTML(task?.startTime || options.startTime || '')}"></label>
     <label class="field"><span>結束時間</span><input type="time" name="endTime" value="${escapeHTML(task?.endTime || '')}"></label>
-    <label class="field"><span>優先級</span><select name="priority">${Object.entries(priorityLabels).map(([key, label]) => `<option value="${key}" ${(task?.priority || options.priority || data.settings.defaultPriority) === key ? 'selected' : ''}>${key.toUpperCase()} · ${label}</option>`).join('')}</select></label>
+    <label class="field"><span>優先級</span><select name="priority"><option value="" ${!(task?.priority || options.priority || data.settings.defaultPriority) ? 'selected' : ''}>無優先級</option>${Object.entries(priorityLabels).filter(([key]) => key !== 'none').map(([key, label]) => `<option value="${key}" ${(task?.priority || options.priority || data.settings.defaultPriority) === key ? 'selected' : ''}>${key.toUpperCase()} · ${label}</option>`).join('')}</select></label>
+    <label class="field"><span>清單</span><select name="listId"><option value="">未指定</option>${listOptions}</select></label>
     <label class="field"><span>專案</span><select name="projectId"><option value="">收集箱／未分類</option>${projectOptions}</select></label>
     <label class="field"><span>預估分鐘</span><input type="number" name="estimatedDuration" min="5" max="600" step="5" value="${Number(task?.estimatedDuration || 25)}"></label>
     <label class="field"><span>重複</span><select name="recurrence"><option value="none">不重複</option><option value="daily" ${task?.recurrence === 'daily' ? 'selected' : ''}>每天</option><option value="weekly" ${task?.recurrence === 'weekly' ? 'selected' : ''}>每週</option><option value="monthly" ${task?.recurrence === 'monthly' ? 'selected' : ''}>每月</option></select></label>

@@ -1,16 +1,19 @@
 import { addDays, dateKey, dayLabel, datesInRange, formatDate, formatMonth, formatTime, parseDate, startOfWeek } from './dates.js';
 import { escapeHTML } from './ui.js';
 import { icon, priorityLabels, renderTask, renderTaskGroup, statusLabels } from './components.js';
+import { renderHomeWidgets } from './widgets.js';
 
 const today = () => dateKey();
 const activeTasks = data => data.tasks.filter(task => task.status !== 'completed');
 
 export function renderPage(route, data, context) {
   if (route.startsWith('project/')) return renderProjectDetail(route.slice(8), data, context);
+  if (route.startsWith('list/')) return renderListDetail(route.slice(5), data, context);
   switch (route) {
     case 'inbox': return renderInbox(data, context);
-    case 'upcoming': return renderUpcoming(data, context);
+    case 'upcoming': return renderCalendar(data, context);
     case 'calendar': return renderCalendar(data, context);
+    case 'lists': return renderLists(data, context);
     case 'projects': return renderProjects(data, context);
     case 'habits': return renderHabits(data);
     case 'focus': return renderFocus(data, context);
@@ -27,7 +30,7 @@ function renderToday(data, context) {
   const tasks = data.tasks.filter(task => task.dueDate === key).sort((a, b) => (a.startTime || '99:99').localeCompare(b.startTime || '99:99') || Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
   const completed = tasks.filter(task => task.status === 'completed').length;
   const rate = tasks.length ? Math.round(completed / tasks.length * 100) : 0;
-  const homeWidgets = renderHomeWidgets(data, context, key);
+  const homeWidgets = renderHomeWidgets(data, context);
   return `<div class="home-swipe-region ${context.homeTransitionDirection > 0 ? 'shift-next' : context.homeTransitionDirection < 0 ? 'shift-previous' : ''}">
     <section class="home-date-card" aria-label="日期與時間">
       <div class="home-date-side">
@@ -46,13 +49,12 @@ function renderToday(data, context) {
       ${tasks.length ? `<div class="task-list today-task-list">${tasks.map(task => renderTask(task, data, { home: true })).join('')}</div>` : `<div class="home-empty"><span class="home-empty-mark">${icon('today')}</span><strong>這天還沒有待辦事項</strong><span>把要做的事先放進清單。</span><button class="button" data-action="quick-add" data-date="${escapeHTML(key)}">${icon('plus')}新增第一項</button></div>`}
     </section>
     <section class="home-widgets-section" aria-label="首頁小工具">
-      <div class="home-widgets-heading"><div><p class="eyebrow">你的首頁</p><h2>小工具</h2></div><div class="home-widget-tools">${context.homeLayout.locked ? `<button class="button button-small is-locked" data-action="home-widget-lock">解除鎖定</button>` : `<button class="button button-small" data-action="home-widget-edit">${context.homeEditMode ? '完成' : '編輯版面'}</button>`}${context.homeEditMode ? `<button class="button button-small" data-action="home-widget-lock">鎖定配置</button>${context.homeLayout.hidden.length ? `<div class="widget-add-options">${context.homeLayout.hidden.map(id => `<button class="button button-small" data-action="home-widget-add" data-id="${id}">+ ${homeWidgetNames[id]}</button>`).join('')}</div>` : ''}` : ''}</div></div>
-      <div class="home-widgets">${homeWidgets}</div>
+      <div class="home-widgets-heading"><div><p class="eyebrow">你的首頁</p><h2>小工具</h2></div><div class="home-widget-tools">${context.homeLayout.locked ? `<button class="button button-small is-locked" data-action="home-widget-lock">解除鎖定</button>` : `<button class="button button-small" data-action="home-widget-edit">${context.homeEditMode ? '完成編輯' : '編輯版面'}</button>`}${context.homeEditMode ? `<button class="button button-small" data-action="home-widget-lock">鎖定配置</button>` : ''}</div></div>
+      <div class="home-widgets">${homeWidgets}</div><button class="button add-widget-button" data-action="home-widget-picker">${icon('plus')}新增小工具</button>
     </section>
   </div>`;
 }
 
-const homeWidgetNames = { inbox: '收件匣', focus: '專注計時', upcoming: '接下來', lists: '我的清單' };
 
 function renderHomeMonth(data, monthValue) {
   const month = new Date(monthValue.getFullYear(), monthValue.getMonth(), 1, 12);
@@ -67,39 +69,12 @@ function renderHomeMonth(data, monthValue) {
   }).join('')}</div></div>`;
 }
 
-function renderHomeWidgets(data, context, key) {
-  const layout = context.homeLayout || { order: ['inbox', 'focus', 'upcoming', 'lists'], hidden: [], sizes: {}, locked: false };
-  return layout.order.filter(id => !layout.hidden.includes(id)).map(id => {
-    const index = layout.order.indexOf(id);
-    const controls = context.homeEditMode ? `<div class="widget-edit-controls"><button class="icon-button" data-action="home-widget-move" data-id="${id}" data-step="-1" aria-label="${homeWidgetNames[id]}往前移" ${index === 0 ? 'disabled' : ''}>↑</button><button class="icon-button" data-action="home-widget-move" data-id="${id}" data-step="1" aria-label="${homeWidgetNames[id]}往後移" ${index === layout.order.length - 1 ? 'disabled' : ''}>↓</button><button class="button button-small" data-action="home-widget-size" data-id="${id}">${layout.sizes[id] === 'wide' ? '縮小' : '放大'}</button><button class="icon-button" data-action="home-widget-remove" data-id="${id}" aria-label="隱藏${homeWidgetNames[id]}">×</button></div>` : '';
-    const commonStart = `<section class="panel home-widget-card ${layout.sizes[id] === 'wide' ? 'is-wide' : ''}" data-widget="${id}"><div class="home-widget-card-heading"><div><p class="eyebrow">${{ inbox: 'CAPTURE', focus: 'FOCUS', upcoming: 'COMING UP', lists: 'LISTS' }[id]}</p><h3>${homeWidgetNames[id]}</h3></div>${controls}</div>`;
-    if (id === 'inbox') {
-      const inbox = activeTasks(data).filter(task => !task.dueDate && !task.projectId).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-      return `${commonStart}<p class="widget-summary">${inbox.length}<span>項尚未整理</span></p>${inbox.slice(0, 2).map(task => `<button class="widget-task" data-action="task-detail" data-id="${escapeHTML(task.id)}"><span>${escapeHTML(task.title)}</span>${icon('chevronRight')}</button>`).join('') || '<p class="empty-inline">收件匣目前是空的。</p>'}<button class="text-button" data-action="quick-add" data-inbox="true">快速收集 ${icon('plus')}</button></section>`;
-    }
-    if (id === 'focus') {
-      const seconds = Math.max(0, Math.ceil((context.focus.running ? context.focus.remainingMs : context.focus.started ? context.focus.remainingMs : context.focus.durations[context.focus.mode] * 60000) / 1000));
-      const timer = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
-      const status = context.focus.running ? '專注進行中' : context.focus.started ? '計時已暫停' : '準備開始';
-      return `${commonStart}<button class="widget-focus-body" data-navigate="focus"><strong id="home-focus-clock">${timer}</strong><span>${status}</span></button><button class="button button-small" data-action="${context.focus.running ? 'focus-pause' : 'focus-start'}">${context.focus.running ? '暫停' : '開始專注'}</button></section>`;
-    }
-    if (id === 'upcoming') {
-      const nextSeven = activeTasks(data).filter(task => task.dueDate > key && task.dueDate <= dateKey(addDays(key, 7))).sort(byDate);
-      const nearest = activeTasks(data).filter(task => task.dueDate > key).sort(byDate).slice(0, 2);
-      const important = nextSeven.find(task => task.priority === 'p1' || task.priority === 'p2');
-      return `${commonStart}<p class="widget-summary">${nextSeven.length}<span>項未來 7 天待辦</span></p>${nearest.map(task => `<button class="widget-task" data-action="task-detail" data-id="${escapeHTML(task.id)}"><span class="widget-task-date">${escapeHTML(dayLabel(task.dueDate))}</span><span>${escapeHTML(task.title)}</span></button>`).join('') || '<p class="empty-inline">近期沒有安排。</p>'}${important ? `<p class="widget-important">下一個重要提醒：${escapeHTML(important.title)}</p>` : ''}<button class="text-button" data-navigate="upcoming">查看接下來 ${icon('chevronRight')}</button></section>`;
-    }
-    const projects = data.projects.map(project => ({ ...project, openCount: data.tasks.filter(task => task.projectId === project.id && task.status !== 'completed').length }));
-    return `${commonStart}<p class="widget-summary">${projects.length}<span>個清單</span></p>${projects.slice(0, 3).map(project => `<button class="widget-task" data-navigate="project/${escapeHTML(project.id)}"><span>${escapeHTML(project.name)}</span><span class="widget-list-count">${project.openCount}</span></button>`).join('') || '<p class="empty-inline">尚未建立清單。</p>'}<button class="text-button" data-navigate="projects">查看我的清單 ${icon('chevronRight')}</button></section>`;
-  }).join('');
-}
-
 function formatClock(value = new Date()) {
   return new Intl.DateTimeFormat('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(value);
 }
 
 function renderInbox(data, context) {
-  const inbox = data.tasks.filter(task => !task.dueDate && !task.projectId);
+  const inbox = data.tasks.filter(task => !task.dueDate && !task.projectId && (!task.listId || task.listId === 'list-inbox'));
   const tasks = filtered(context.filters.status ? inbox : inbox.filter(task => task.status !== 'completed'), data, context);
   return `<section class="page-intro"><div><p class="eyebrow">CAPTURE FIRST, ORGANIZE LATER</p><h1>收集箱</h1><p class="muted">先記下突然想到的事，之後再決定時間和專案。</p></div><button class="button button-primary" data-action="quick-add" data-inbox="true">${icon('plus')}快速收集 <kbd>Q</kbd></button></section>
     <section class="panel task-panel"><div class="panel-heading"><div><h2>尚未整理</h2><p class="muted">${tasks.length} 個事項</p></div><button class="button" data-action="open-task-form" data-inbox="true">新增事項</button></div>${renderFilterBar(context, data)}${tasks.length ? `<div class="task-list">${tasks.map(task => renderTask(task, data, { compact: context.taskView === 'compact' })).join('')}</div>` : emptyState('收集箱已清空', '把腦中的想法先放進來，稍後再整理。', '新增事項', 'quick-add')}</section>`;
@@ -132,15 +107,32 @@ function renderCalendar(data, context) {
     return `<div class="calendar-day ${key === today() ? 'is-today' : ''} ${muted ? 'is-muted' : ''}" data-drop-date="${key}"><button class="calendar-day-number" data-action="calendar-add" data-date="${key}">${mode === 'day' ? escapeHTML(formatDate(key, { weekday: true, year: true })) : day.getDate()}</button><div class="calendar-events">${tasks.slice(0, mode === 'month' ? 3 : 8).map(task => { const projectColor = data.projects.find(project => project.id === task.projectId)?.color || ''; return `<button class="calendar-event ${task.status === 'completed' ? 'is-complete' : ''}" style="${projectColor ? `--event-color:${escapeHTML(projectColor)}` : ''}" draggable="true" data-task-id="${escapeHTML(task.id)}" data-action="task-detail" data-id="${escapeHTML(task.id)}" title="${escapeHTML(task.title)}">${task.startTime ? `${escapeHTML(formatTime(task.startTime, data.settings.hour24))} ` : ''}${escapeHTML(task.title)}</button>`; }).join('')}${tasks.length > (mode === 'month' ? 3 : 8) ? `<span class="calendar-more">+${tasks.length - (mode === 'month' ? 3 : 8)} 項</span>` : ''}</div></div>`;
   }).join('');
   const heading = mode === 'month' ? formatMonth(date) : mode === 'week' ? `${formatDate(days[0], { month: true })} — ${formatDate(days[6])}` : formatDate(date, { weekday: true, year: true });
+  const future = data.tasks.filter(task => task.dueDate && task.dueDate >= today()).sort(byDate);
+  const futureGroups = new Map();
+  future.forEach(task => { if (!futureGroups.has(task.dueDate)) futureGroups.set(task.dueDate, []); futureGroups.get(task.dueDate).push(task); });
+  const schedule = futureGroups.size ? [...futureGroups].slice(0, 14).map(([day, items]) => `<section class="calendar-agenda-day"><h3>${escapeHTML(dayLabel(day))}<span>${escapeHTML(formatDate(day))}</span></h3><div class="task-list">${items.map(task => renderTask(task, data, { compact: true })).join('')}</div></section>`).join('') : '<p class="empty-inline">目前沒有未來安排。新增日期後，任務會出現在這裡。</p>';
   return `<section class="page-intro"><div><p class="eyebrow">MAKE ROOM FOR WHAT MATTERS</p><h1>行事曆</h1><p class="muted">${escapeHTML(heading)}</p></div><button class="button button-primary" data-action="quick-add">${icon('plus')}新增任務</button></section>
     <section class="panel calendar-panel"><div class="calendar-toolbar"><div class="calendar-controls"><button class="icon-button" aria-label="上一個期間" data-action="calendar-shift" data-step="-1">${icon('chevronLeft')}</button><button class="button button-small" data-action="calendar-today">今天</button><button class="icon-button" aria-label="下一個期間" data-action="calendar-shift" data-step="1">${icon('chevronRight')}</button><h2>${escapeHTML(heading)}</h2></div><div class="view-switch">${['month', 'week', 'day'].map(item => `<button data-action="calendar-mode" data-mode="${item}" class="${mode === item ? 'is-active' : ''}">${{ month: '月', week: '週', day: '日' }[item]}</button>`).join('')}</div></div>
-    <div class="calendar-grid ${mode === 'day' ? 'calendar-day-view' : ''}" style="--calendar-cols:${mode === 'day' ? 1 : 7}">${headers ? `<div class="calendar-weekdays">${headers}</div>` : ''}${cells}</div><p class="calendar-hint">點日期新增任務；把任務拖到日期可調整截止日。</p></section>`;
+    <div class="calendar-grid ${mode === 'day' ? 'calendar-day-view' : ''}" style="--calendar-cols:${mode === 'day' ? 1 : 7}">${headers ? `<div class="calendar-weekdays">${headers}</div>` : ''}${cells}</div><p class="calendar-hint">月份瀏覽與近期任務整合在同一頁。</p></section>
+    <section class="panel calendar-agenda"><div class="panel-heading"><div><p class="eyebrow">UP NEXT</p><h2>接下來的安排</h2><p class="muted">${future.length} 項尚未到期的待辦</p></div></div>${schedule}</section>`;
 }
 
 function renderProjects(data, context) {
   const total = data.projects.length;
   return `<section class="page-intro"><div><p class="eyebrow">PROJECTS, IN PROGRESS</p><h1>專案</h1><p class="muted">把相關任務放在一起，循序推進。</p></div><button class="button button-primary" data-action="project-add">${icon('plus')}新增專案</button></section>
     ${total ? `<div class="project-grid">${data.projects.map(project => projectCard(project, data)).join('')}</div>` : emptyState('建立第一個專案', '用專案整理有共同目標的任務。', '新增專案', 'project-add')}`;
+}
+
+function renderLists(data) {
+  const lists = data.lists || [];
+  return `<section class="page-intro"><div><p class="eyebrow">YOUR TASK LISTS</p><h1>我的清單</h1><p class="muted">用簡單清單整理不同類型的待辦事項。</p></div><button class="button button-primary" data-action="list-add">${icon('plus')}新增清單</button></section><div class="list-grid">${lists.map(list => { const count = data.tasks.filter(task => task.listId === list.id && task.status !== 'completed').length; return `<article class="user-list-card"><button class="user-list-open" data-navigate="list/${encodeURIComponent(list.id)}"><span class="list-color-dot" style="--list-color:${escapeHTML(list.color || '#6574b8')}"></span><strong>${escapeHTML(list.name)}</strong><small>${count} 項待辦</small>${icon('chevronRight')}</button><div><button class="icon-button" data-action="list-edit" data-id="${escapeHTML(list.id)}" aria-label="編輯${escapeHTML(list.name)}">${icon('edit')}</button>${!list.system ? `<button class="icon-button" data-action="list-delete" data-id="${escapeHTML(list.id)}" aria-label="刪除${escapeHTML(list.name)}">${icon('more')}</button>` : ''}</div></article>`; }).join('')}</div>`;
+}
+
+function renderListDetail(id, data, context) {
+  const list = (data.lists || []).find(item => item.id === id);
+  if (!list) return emptyState('找不到這個清單', '這個清單可能已經被移除。', '回到我的清單', 'navigate-lists');
+  const tasks = filtered(data.tasks.filter(task => task.listId === id), data, context);
+  return `<section class="page-intro"><div><button class="back-link" data-navigate="lists">${icon('chevronLeft')}我的清單</button><p class="eyebrow">TASK LIST</p><h1><i class="list-color-dot" style="--list-color:${escapeHTML(list.color || '#6574b8')}"></i>${escapeHTML(list.name)}</h1><p class="muted">${tasks.length} 項待辦事項</p></div><div class="panel-actions"><button class="button" data-action="list-edit" data-id="${escapeHTML(list.id)}">編輯清單</button><button class="button button-primary" data-action="quick-add" data-list="${escapeHTML(list.id)}">${icon('plus')}新增待辦</button></div></section><section class="panel task-panel"><div class="panel-heading"><div><h2>待辦事項</h2></div></div>${renderFilterBar(context, data)}${tasks.length ? `<div class="task-list">${tasks.map(task => renderTask(task, data)).join('')}</div>` : emptyInline('這份清單目前是空的。')}</section>`;
 }
 
 function projectCard(project, data) {
@@ -198,12 +190,18 @@ function renderFocus(data, context) {
   const secs = Math.floor(remaining % 60000 / 1000);
   const todaySessions = data.focusSessions.filter(item => item.date === today());
   const focusMinutes = todaySessions.reduce((sum, item) => sum + Number(item.minutes), 0);
+  const selectedMinutes = Number(focus.durations[focus.mode] || 25);
+  const wheelHours = Math.floor(selectedMinutes / 60);
+  const wheelMinutes = selectedMinutes % 60;
+  const wheelDisabled = focus.started || focus.running;
+  const maxWheelHour = focus.mode === 'focus' ? 2 : focus.mode === 'long' ? 1 : 1;
+  const wheel = (unit, selected, values, label) => `<div class="focus-wheel-column"><span>${label}</span><div class="focus-wheel" role="listbox" aria-label="${label}" data-no-day-swipe><span class="focus-wheel-spacer" aria-hidden="true"></span>${values.map(value => `<button role="option" aria-selected="${value === selected}" class="focus-wheel-value ${value === selected ? 'is-selected' : ''}" data-action="focus-duration-wheel" data-wheel="${unit}" data-value="${value}" ${wheelDisabled ? 'disabled' : ''}>${String(value).padStart(2, '0')}</button>`).join('')}<span class="focus-wheel-spacer" aria-hidden="true"></span></div></div>`;
   return `<section class="page-intro"><div><p class="eyebrow">MAKE SPACE FOR DEEP WORK</p><h1>專注時間</h1><p class="muted">一次專心一件事，休息也算進計畫。</p></div></section>
     <div class="focus-layout"><section class="panel focus-panel"><div class="focus-mode-switch">${['focus', 'short', 'long'].map(mode => `<button data-action="focus-mode" data-mode="${mode}" class="${focus.mode === mode ? 'is-active' : ''}">${{ focus: '專注', short: '短休息', long: '長休息' }[mode]}</button>`).join('')}</div>
-      <div class="focus-ring ${focus.running ? 'is-running' : ''}" style="--focus-progress:${Math.max(0, Math.min(100, (1 - remaining / (focus.duration * 60000)) * 100))}%"><div><span class="focus-clock" id="focus-clock">${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}</span><span class="muted">${{ focus: '專注中', short: '短暫休息', long: '長休息' }[focus.mode]}</span></div></div>
+      <div class="focus-ring ${focus.running ? 'is-running' : ''}" style="--focus-progress:${Math.max(0, Math.min(100, (1 - remaining / (Number(focus.durations[focus.mode] || 25) * 60000)) * 100))}%"><div><span class="focus-clock" id="focus-clock">${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}</span><span class="muted">${{ focus: '專注中', short: '短暫休息', long: '長休息' }[focus.mode]}</span></div></div>
       <label class="focus-task-label">目前專注任務<select data-setting="focus-task"><option value="">不連結任務</option>${activeTasks(data).map(item => `<option value="${escapeHTML(item.id)}" ${focus.taskId === item.id ? 'selected' : ''}>${escapeHTML(item.title)}</option>`).join('')}</select></label>
       <div class="focus-controls">${focus.running ? `<button class="button button-primary" data-action="focus-pause">暫停</button>` : `<button class="button button-primary" data-action="focus-start">${focus.started ? '繼續' : '開始專注'}</button>`}<button class="button" data-action="focus-reset">重設</button><button class="button" data-action="focus-skip">跳過</button></div>
-      <div class="focus-duration"><label>專注分鐘<input type="number" min="1" max="120" value="${focus.durations.focus}" data-duration="focus"></label><label>短休息<input type="number" min="1" max="60" value="${focus.durations.short}" data-duration="short"></label><label>長休息<input type="number" min="1" max="90" value="${focus.durations.long}" data-duration="long"></label></div>
+      <div class="focus-duration-picker"><p>設定${{focus:'專注',short:'短休息',long:'長休息'}[focus.mode]}時間 <span>${focus.started ? '計時結束或重設後可修改' : '上下滑動選擇'}</span></p><div class="focus-wheel-pair">${wheel('hours', wheelHours, Array.from({length:maxWheelHour + 1}, (_,i) => i), '小時')}${wheel('minutes', wheelMinutes, Array.from({length:60}, (_,i) => i), '分鐘')}</div><div class="focus-wheel-selection" aria-live="polite">${String(wheelHours).padStart(2, '0')} 小時 ${String(wheelMinutes).padStart(2, '0')} 分鐘</div></div>
     </section><aside class="focus-side"><section class="panel widget"><p class="eyebrow">TODAY</p><h2>${formatMinutes(focusMinutes)}</h2><p class="muted">今日專注時間 · ${todaySessions.length} 個時段</p></section><section class="panel widget"><p class="eyebrow">SESSION HISTORY</p><h2>最近紀錄</h2>${data.focusSessions.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 6).map(item => `<div class="history-row"><span>${escapeHTML(formatDate(item.date))}</span><strong>${item.minutes} 分鐘</strong><span class="muted">${escapeHTML(data.tasks.find(task => task.id === item.taskId)?.title || '自由專注')}</span></div>`).join('') || '<p class="empty-inline">完成第一個專注時段後，這裡會有紀錄。</p>'}</section></aside></div>`;
 }
 

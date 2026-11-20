@@ -2,6 +2,7 @@ import { addDays, dateKey, formatDate, formatTime, getGreeting, parseDate, parse
 import { clearAllData, clearDemoData, createTask, exportData, getData, getUIState, importData, newId, resetDemoData, updateData, updateUI } from './data.js';
 import { icon, renderTaskForm, statusLabels } from './components.js';
 import { renderPage } from './pages.js';
+import { createHomeLayout, defaultWidget, renderWidgetPicker, WIDGET_REGISTRY } from './widgets.js';
 import { confirmDialog, escapeHTML, openDialog, toast } from './ui.js';
 
 const app = document.getElementById('app');
@@ -17,6 +18,11 @@ let projectView = 'list';
 let statsRange = 7;
 let query = '';
 let draggedTaskId = '';
+let draggedWidgetId = '';
+let widgetResizeStart = null;
+let suppressWidgetResizeClickUntil = 0;
+let focusWheelScrollTimer;
+const userScrolledFocusWheels = new WeakSet();
 let filterRenderTimer;
 let homeDate = dateKey();
 let observedToday = homeDate;
@@ -24,20 +30,18 @@ let homeCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth()
 let drawerOpen = false;
 let homeEditMode = false;
 let homeTransitionDirection = 0;
-const HOME_WIDGETS = ['inbox', 'focus', 'upcoming', 'lists'];
 let homeLayout = loadHomeLayout();
 
 function loadHomeLayout() {
-  const fallback = { order: [...HOME_WIDGETS], hidden: [], sizes: {}, locked: false };
-  try {
-    const stored = JSON.parse(localStorage.getItem('dayflow.home-layout.v1') || '{}');
-    const order = [...new Set([...(Array.isArray(stored.order) ? stored.order : []), ...HOME_WIDGETS])].filter(id => HOME_WIDGETS.includes(id));
-    return { order, hidden: (Array.isArray(stored.hidden) ? stored.hidden : []).filter(id => HOME_WIDGETS.includes(id)), sizes: stored.sizes && typeof stored.sizes === 'object' ? stored.sizes : {}, locked: Boolean(stored.locked) };
-  } catch { return fallback; }
+  try { return createHomeLayout(JSON.parse(localStorage.getItem('dayflow.home-layout.v2') || localStorage.getItem('dayflow.home-layout.v1') || '{}')); }
+  catch { return createHomeLayout(); }
 }
 
 function saveHomeLayout() {
-  try { localStorage.setItem('dayflow.home-layout.v1', JSON.stringify(homeLayout)); } catch { /* The home arrangement is optional. */ }
+  try {
+    localStorage.setItem('dayflow.home-layout.v2', JSON.stringify(homeLayout));
+    localStorage.setItem('dayflow.home-layout.v1', JSON.stringify({ order: homeLayout.items.map(item => item.id), hidden: homeLayout.hidden, sizes: Object.fromEntries(homeLayout.items.map(item => [item.id, item.size])), locked: homeLayout.locked }));
+  } catch { /* The home arrangement is optional. */ }
 }
 
 function loadFocus() {
@@ -67,15 +71,19 @@ function render() {
     ${selected ? `<div class="bulk-bar"><span>已選取 ${selected} 項</span><button class="button button-small" data-action="bulk-complete">全部完成</button><select data-bulk-priority aria-label="變更優先級"><option value="">變更優先級</option><option value="p1">P1 緊急</option><option value="p2">P2 高</option><option value="p3">P3 一般</option><option value="p4">P4 低</option></select><button class="button button-small button-danger" data-action="bulk-delete">刪除</button><button class="icon-button" data-action="clear-selection" aria-label="取消選取">${icon('close')}</button></div>` : ''}
   </div>`;
   applySelections();
+  requestAnimationFrame(() => app.querySelectorAll('.focus-wheel').forEach(wheel => {
+    const selected = wheel.querySelector('[aria-selected="true"]');
+    if (selected) wheel.scrollTop = selected.offsetTop - (wheel.clientHeight - selected.offsetHeight) / 2;
+  }));
 }
 
 function renderDrawer(data) {
-  const routes = [['today', '今天'], ['inbox', '收集箱', inboxCount(data)], ['upcoming', '即將到來', dueSoonCount(data)], ['calendar', '行事曆'], ['projects', '我的清單'], ['habits', '習慣'], ['focus', '專注'], ['statistics', '統計'], ['settings', '設定']];
-  return `<div class="drawer-scrim" data-action="close-drawer" aria-hidden="true"></div><aside class="app-drawer" aria-label="主選單"><div class="drawer-heading"><div><p class="eyebrow">DAYFLOW</p><h2>導覽</h2></div><button class="icon-button" data-action="close-drawer" aria-label="關閉選單">${icon('close')}</button></div><nav class="drawer-nav">${routes.map(([id, label, badge]) => `<a href="#${id}" data-navigate="${id}" class="drawer-nav-link ${route === id ? 'is-active' : ''}">${icon(({ today: 'today', inbox: 'inbox', upcoming: 'calendar', calendar: 'calendar', projects: 'projects', habits: 'habits', focus: 'focus', statistics: 'stats', settings: 'settings' })[id])}<span>${label}</span>${badge ? `<i>${badge}</i>` : ''}</a>`).join('')}</nav><div class="drawer-projects"><div class="drawer-section-heading"><span>專案</span><button class="icon-button" data-action="project-add" aria-label="新增專案">${icon('plus')}</button></div>${data.projects.map(project => `<a class="drawer-project-link" href="#project/${encodeURIComponent(project.id)}" data-navigate="project/${escapeHTML(project.id)}"><i style="--project-color:${escapeHTML(project.color || '#6674b8')}"></i>${escapeHTML(project.name)}</a>`).join('') || '<p class="empty-inline">尚無專案</p>'}</div><div class="drawer-footer"><span class="local-indicator"></span>資料儲存在此裝置</div></aside>`;
+  const routes = [['today', '今天'], ['inbox', '收集箱', inboxCount(data)], ['calendar', '行事曆'], ['lists', '我的清單'], ['projects', '專案'], ['habits', '習慣'], ['focus', '專注'], ['statistics', '統計'], ['settings', '設定']];
+  return `<div class="drawer-scrim" data-action="close-drawer" aria-hidden="true"></div><aside class="app-drawer" aria-label="主選單"><div class="drawer-heading"><div><p class="eyebrow">DAYFLOW</p><h2>導覽</h2></div><button class="icon-button" data-action="close-drawer" aria-label="關閉選單">${icon('close')}</button></div><nav class="drawer-nav">${routes.map(([id, label, badge]) => `<a href="#${id}" data-navigate="${id}" class="drawer-nav-link ${route === id ? 'is-active' : ''}">${icon(({ today: 'today', inbox: 'inbox', calendar: 'calendar', lists: 'projects', projects: 'projects', habits: 'habits', focus: 'focus', statistics: 'stats', settings: 'settings' })[id])}<span>${label}</span>${badge ? `<i>${badge}</i>` : ''}</a>`).join('')}</nav><div class="drawer-projects"><div class="drawer-section-heading"><span>專案捷徑</span><button class="icon-button" data-action="project-add" aria-label="新增專案">${icon('plus')}</button></div>${data.projects.map(project => `<a class="drawer-project-link" href="#project/${encodeURIComponent(project.id)}" data-navigate="project/${escapeHTML(project.id)}"><i style="--project-color:${escapeHTML(project.color || '#6674b8')}"></i>${escapeHTML(project.name)}</a>`).join('') || '<p class="empty-inline">尚無專案</p>'}</div><div class="drawer-footer"><span class="local-indicator"></span>資料儲存在此裝置</div></aside>`;
 }
 
 function dueSoonCount(data) { return data.tasks.filter(task => task.status !== 'completed' && task.dueDate >= dateKey() && task.dueDate <= dateKey(addDays(new Date(), 7))).length; }
-function inboxCount(data) { return data.tasks.filter(task => task.status !== 'completed' && !task.dueDate && !task.projectId).length; }
+function inboxCount(data) { return data.tasks.filter(task => task.status !== 'completed' && !task.dueDate && !task.projectId && (!task.listId || task.listId === 'list-inbox')).length; }
 
 function applyPreferences(settings) {
   const dark = settings.theme === 'dark' || settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches;
@@ -99,12 +107,17 @@ function setRoute(value) {
 
 function openQuickAdd(options = {}) {
   const data = getData();
+  if (options.kind === 'project') {
+    const dialog = openDialog('快速新增', `<div class="quick-add-tabs"><button data-action="quick-add-type" data-type="task">待辦</button><button class="is-active" data-action="quick-add-type" data-type="project">專案</button></div><form class="form-grid quick-add-form" data-form="quick-project"><label class="field full"><span>專案名稱</span><input name="name" maxlength="60" value="${escapeHTML(options.name || '')}" placeholder="新專案"></label><label class="field"><span>專案顏色</span><input type="color" name="color" value="${escapeHTML(options.color || '#6674b8')}"></label><label class="field"><span>專案日期</span><input type="date" name="deadline" value="${escapeHTML(options.deadline || '')}"></label><label class="field full"><span>描述</span><textarea name="description" rows="2" placeholder="選填">${escapeHTML(options.description || '')}</textarea></label><div class="form-actions full"><button class="button button-primary" type="submit">建立專案</button><button class="button" type="button" data-action="close-dialog">取消</button></div></form>`);
+    return dialog;
+  }
   const parsed = options.title ? parseQuickDate(options.title) : { date: options.dueDate || '', time: '', title: options.title || '', recurrence: 'none' };
   const projects = data.projects.map(project => `<option value="${escapeHTML(project.id)}" ${options.projectId === project.id ? 'selected' : ''}>${escapeHTML(project.name)}</option>`).join('');
+  const lists = (data.lists || []).map(list => `<option value="${escapeHTML(list.id)}" ${options.listId === list.id || (!options.listId && list.id === 'list-inbox') ? 'selected' : ''}>${escapeHTML(list.name)}</option>`).join('');
   const recurrenceLabel = parsed.recurrence === 'daily' ? ' · 每天重複' : parsed.recurrence === 'weekly' ? ' · 每週重複' : '';
-  const dialog = openDialog('快速新增', `<p class="muted quick-add-hint">支援「明天下午 3 點健身」、「每週一整理課程」等簡單日期與時間。</p><form class="form-grid quick-add-form" data-form="quick-add"><label class="field full"><span>任務名稱</span><input name="title" maxlength="120" required autofocus value="${escapeHTML(options.title || '')}" placeholder="先記下要做的事"></label><div class="quick-parse-note full" data-parse-note>${parsed.date ? `辨識為 ${escapeHTML(formatDate(parsed.date))}${parsed.time ? ` ${escapeHTML(formatTime(parsed.time, data.settings.hour24))}` : ''}${recurrenceLabel}` : '也可以稍後再安排時間。'}</div><label class="field"><span>日期</span><input type="date" name="dueDate" value="${escapeHTML(options.dueDate || '')}"></label><label class="field"><span>時間</span><input type="time" name="startTime"></label><label class="field"><span>優先級</span><select name="priority">${[['p1', 'P1 緊急'], ['p2', 'P2 高'], ['p3', 'P3 一般'], ['p4', 'P4 低']].map(([value, label]) => `<option value="${value}" ${data.settings.defaultPriority === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label class="field"><span>專案</span><select name="projectId"><option value="">收集箱／未分類</option>${projects}</select></label><label class="field full"><span>標籤</span><input name="tags" placeholder="以逗號分隔"></label><div class="form-actions full"><button class="button button-primary" type="submit">建立任務</button><button class="button" type="button" data-action="close-dialog">取消</button></div></form>`);
+  const dialog = openDialog('快速新增', `<div class="quick-add-tabs"><button class="is-active" data-action="quick-add-type" data-type="task">待辦</button><button data-action="quick-add-type" data-type="project">專案</button></div><p class="muted quick-add-hint">支援「明天下午 3 點健身」、「每週一整理課程」等簡單日期與時間。</p><form class="form-grid quick-add-form" data-form="quick-add"><label class="field full"><span>任務名稱</span><input name="title" maxlength="120" required autofocus value="${escapeHTML(options.title || '')}" placeholder="先記下要做的事"></label><div class="quick-parse-note full" data-parse-note>${parsed.date ? `辨識為 ${escapeHTML(formatDate(parsed.date))}${parsed.time ? ` ${escapeHTML(formatTime(parsed.time, data.settings.hour24))}` : ''}${recurrenceLabel}` : '也可以稍後再安排時間。'}</div><label class="field"><span>清單</span><select name="listId">${lists}</select></label><label class="field"><span>所屬專案</span><select name="projectId"><option value="">不指定</option>${projects}</select></label><label class="field"><span>優先級</span><select name="priority">${[['', '無優先級'], ['p4', '低'], ['p3', '中'], ['p2', '高'], ['p1', '緊急']].map(([value, label]) => `<option value="${value}" ${value === (options.priority || '') ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label class="field"><span>日期</span><input type="date" name="dueDate" value="${escapeHTML(options.dueDate || '')}"></label><label class="field"><span>時間</span><input type="time" name="startTime" value="${escapeHTML(options.startTime || '')}"></label><div class="form-actions full"><button class="button button-primary" type="submit">建立待辦</button><button class="button" type="button" data-action="close-dialog">取消</button></div></form>`);
   const form = dialog.querySelector('form');
-  if (options.inbox) { form.elements.projectId.value = ''; form.elements.dueDate.value = ''; }
+  if (options.inbox) { form.elements.projectId.value = ''; form.elements.listId.value = 'list-inbox'; form.elements.dueDate.value = ''; }
   if (options.dueDate) form.elements.dueDate.value = options.dueDate;
   form.addEventListener('input', event => {
     if (event.target.name !== 'title') return;
@@ -130,7 +143,7 @@ function openTaskDetail(taskId) {
   if (!task) return;
   const project = data.projects.find(item => item.id === task.projectId);
   const subtasks = task.subtasks?.length ? `<div class="detail-subtasks"><h3>子任務</h3>${task.subtasks.map((subtask, index) => `<label class="subtask-row"><input type="checkbox" data-action="toggle-subtask" data-id="${escapeHTML(task.id)}" data-index="${index}" ${subtask.done ? 'checked' : ''}><span>${escapeHTML(subtask.title)}</span></label>`).join('')}</div>` : '';
-  const dialog = openDialog('任務詳細', `<div class="task-detail"><div class="task-detail-top"><span class="priority-label ${task.priority}">${task.priority.toUpperCase()} · ${({ p1: '緊急', p2: '高', p3: '一般', p4: '低' })[task.priority]}</span><select data-task-status="${escapeHTML(task.id)}">${Object.entries(statusLabels).map(([value, label]) => `<option value="${value}" ${task.status === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div><h2>${escapeHTML(task.title)}</h2>${task.description ? `<p>${escapeHTML(task.description)}</p>` : '<p class="muted">尚未新增描述</p>'}<div class="detail-meta">${task.dueDate ? `<span>期限：${escapeHTML(formatDate(task.dueDate))}</span>` : '<span>尚未安排日期</span>'}${task.startTime ? `<span>開始：${escapeHTML(formatTime(task.startTime, data.settings.hour24))}</span>` : ''}${task.endTime ? `<span>結束：${escapeHTML(formatTime(task.endTime, data.settings.hour24))}</span>` : ''}<span>預估：${Number(task.estimatedDuration || 25)} 分鐘</span>${project ? `<span>專案：${escapeHTML(project.name)}</span>` : ''}<span>重複：${escapeHTML(({ none: '不重複', daily: '每天', weekly: '每週', monthly: '每月' })[task.recurrence] || '不重複')}</span><span>建立於 ${escapeHTML(formatDate(task.createdAt, { year: true }))}</span>${task.tags?.map(tag => `<span class="tag">${escapeHTML(tag)}</span>`).join('') || ''}</div>${subtasks}${task.notes ? `<div class="detail-notes"><h3>備註</h3><p>${escapeHTML(task.notes)}</p></div>` : ''}<div class="form-actions"><button class="button button-primary" data-action="task-edit" data-id="${escapeHTML(task.id)}">編輯</button><button class="button" data-action="toggle-task" data-id="${escapeHTML(task.id)}">${task.status === 'completed' ? '標記未完成' : '完成任務'}</button><button class="button button-danger" data-action="task-delete" data-id="${escapeHTML(task.id)}">刪除</button></div></div>`, { wide: true });
+  const dialog = openDialog('任務詳細', `<div class="task-detail"><div class="task-detail-top"><label class="priority-select-label"><span class="priority-dot ${task.priority || 'none'}"></span><select data-task-priority="${escapeHTML(task.id)}">${[['none','無優先級'],['p4','低'],['p3','中'],['p2','高'],['p1','緊急']].map(([value,label]) => `<option value="${value}" ${(task.priority || 'none') === value ? 'selected' : ''}>${label}優先級</option>`).join('')}</select></label><select data-task-status="${escapeHTML(task.id)}">${Object.entries(statusLabels).map(([value, label]) => `<option value="${value}" ${task.status === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div><h2>${escapeHTML(task.title)}</h2>${task.description ? `<p>${escapeHTML(task.description)}</p>` : '<p class="muted">尚未新增描述</p>'}<div class="detail-meta">${task.dueDate ? `<span>期限：${escapeHTML(formatDate(task.dueDate))}</span>` : '<span>尚未安排日期</span>'}${task.startTime ? `<span>開始：${escapeHTML(formatTime(task.startTime, data.settings.hour24))}</span>` : ''}${task.endTime ? `<span>結束：${escapeHTML(formatTime(task.endTime, data.settings.hour24))}</span>` : ''}<span>預估：${Number(task.estimatedDuration || 25)} 分鐘</span>${project ? `<span>專案：${escapeHTML(project.name)}</span>` : ''}<span>重複：${escapeHTML(({ none: '不重複', daily: '每天', weekly: '每週', monthly: '每月' })[task.recurrence] || '不重複')}</span><span>建立於 ${escapeHTML(formatDate(task.createdAt, { year: true }))}</span>${task.tags?.map(tag => `<span class="tag">${escapeHTML(tag)}</span>`).join('') || ''}</div>${subtasks}${task.notes ? `<div class="detail-notes"><h3>備註</h3><p>${escapeHTML(task.notes)}</p></div>` : ''}<div class="form-actions"><button class="button button-primary" data-action="task-edit" data-id="${escapeHTML(task.id)}">編輯</button><button class="button" data-action="toggle-task" data-id="${escapeHTML(task.id)}">${task.status === 'completed' ? '標記未完成' : '完成任務'}</button><button class="button button-danger" data-action="task-delete" data-id="${escapeHTML(task.id)}">刪除</button></div></div>`, { wide: true });
   dialog.querySelector('[data-task-status]')?.addEventListener('change', event => {
     updateData(next => { const found = next.tasks.find(item => item.id === task.id); if (found) { found.status = event.target.value; found.completedAt = found.status === 'completed' ? new Date().toISOString() : ''; } });
     toast('任務狀態已更新');
@@ -142,6 +155,43 @@ function openProjectForm(projectId = '') {
   const project = projectId ? getData().projects.find(item => item.id === projectId) : null;
   const dialog = openDialog(project ? '編輯專案' : '新增專案', `<form class="form-grid" data-form="project"><input type="hidden" name="id" value="${escapeHTML(project?.id || '')}"><label class="field full"><span>專案名稱</span><input name="name" required maxlength="60" value="${escapeHTML(project?.name || '')}" placeholder="例如：作品集改版"></label><label class="field full"><span>描述</span><textarea name="description" rows="3">${escapeHTML(project?.description || '')}</textarea></label><label class="field"><span>專案色彩</span><input type="color" name="color" value="${escapeHTML(project?.color || '#6674b8')}"></label><label class="field"><span>期限</span><input type="date" name="deadline" value="${escapeHTML(project?.deadline || '')}"></label><div class="form-actions full"><button class="button button-primary" type="submit">${project ? '儲存專案' : '建立專案'}</button><button class="button" type="button" data-action="close-dialog">取消</button></div></form>`);
   dialog.querySelector('input[name="name"]')?.focus({ preventScroll: true });
+}
+
+function openWidgetSettings(widgetId) {
+  const item = homeLayout.items.find(entry => entry.id === widgetId);
+  if (!item) return;
+  const data = getData();
+  const projects = data.projects.map(project => `<option value="${escapeHTML(project.id)}" ${item.config?.projectId === project.id ? 'selected' : ''}>${escapeHTML(project.name)}</option>`).join('');
+  const goals = data.goals || [];
+  const selectedGoal = goals.find(goal => goal.id && goal.id === item.config?.goalId) || goals[0];
+  const goalOptions = `<option value="">新增目標</option>${goals.map((goal, index) => `<option value="${escapeHTML(goal.id || `legacy-${index}`)}" ${(selectedGoal === goal) ? 'selected' : ''}>${escapeHTML(goal.name || `目標 ${index + 1}`)}</option>`).join('')}`;
+  const dialog = openDialog('小工具設定', `<form class="form-grid" data-form="widget-settings"><input type="hidden" name="id" value="${escapeHTML(item.id)}"><label class="field full"><span>小工具名稱</span><input name="name" maxlength="40" value="${escapeHTML(item.name || WIDGET_REGISTRY[item.type]?.name || '')}"></label>${item.type === 'countdown' ? `<label class="field"><span>目標名稱</span><input name="target" value="${escapeHTML(item.config?.target || '')}" placeholder="例如：旅行"></label><label class="field"><span>目標日期</span><input type="date" name="date" value="${escapeHTML(item.config?.date || '')}"></label>` : ''}${item.type === 'projectTasks' ? `<label class="field full"><span>選擇專案</span><select name="projectId">${projects}</select></label>` : ''}${item.type === 'goals' ? `<label class="field full"><span>選擇或新增目標</span><select name="goalId">${goalOptions}</select></label><label class="field full"><span>目標名稱</span><input name="goalName" maxlength="60" value="${escapeHTML(selectedGoal?.name || '')}" placeholder="例如：每週閱讀"></label><label class="field"><span>目標值</span><input type="number" name="target" min="1" value="${Number(selectedGoal?.target || 1)}"></label><label class="field"><span>目前進度</span><input type="number" name="progress" min="0" value="${Number(selectedGoal?.progress || 0)}"></label>` : ''}<div class="form-actions full"><button class="button button-primary" type="submit">儲存</button><button class="button" type="button" data-action="close-dialog">取消</button></div></form>`);
+  if (item.type === 'goals') {
+    const selector = dialog.querySelector('[name="goalId"]');
+    selector?.addEventListener('change', () => {
+      const goal = goals.find((entry, index) => (entry.id || `legacy-${index}`) === selector.value);
+      dialog.querySelector('[name="goalName"]').value = goal?.name || '';
+      dialog.querySelector('[name="target"]').value = goal?.target || 1;
+      dialog.querySelector('[name="progress"]').value = goal?.progress || 0;
+    });
+  }
+}
+
+function openWidgetSizePicker(widgetId) {
+  const item = homeLayout.items.find(entry => entry.id === widgetId);
+  if (!item) return;
+  const choices = [['small', '小尺寸', '▰'], ['medium', '中尺寸', '▰▰'], ['large', '大尺寸', '▰▰▰'], ['full', '全寬', '▰　▰']];
+  openDialog('調整小工具大小', `<div class="widget-size-options">${choices.map(([size, label, preview]) => `<button class="widget-size-option ${item.size === size ? 'is-selected' : ''}" data-action="home-widget-size-set" data-id="${escapeHTML(item.id)}" data-size="${size}"><span>${preview}</span><strong>${label}</strong></button>`).join('')}</div>`);
+}
+
+function openWidgetPicker() {
+  const dialog = openDialog('新增小工具', renderWidgetPicker(homeLayout), { wide: true });
+  dialog.classList.add('widget-picker-dialog');
+}
+
+function openListForm(listId = '') {
+  const list = listId ? getData().lists.find(item => item.id === listId) : null;
+  openDialog(list ? '編輯清單' : '新增清單', `<form class="form-grid" data-form="list"><input type="hidden" name="id" value="${escapeHTML(list?.id || '')}"><label class="field full"><span>清單名稱</span><input name="name" maxlength="50" required value="${escapeHTML(list?.name || '')}" placeholder="例如：閱讀清單"></label><label class="field"><span>顏色</span><input type="color" name="color" value="${escapeHTML(list?.color || '#6574b8')}"></label><div class="form-actions full"><button class="button button-primary" type="submit">${list ? '儲存清單' : '建立清單'}</button><button class="button" type="button" data-action="close-dialog">取消</button></div></form>`);
 }
 
 function openHabitForm(id = '') {
@@ -167,7 +217,7 @@ function parseFormTask(form) {
   const task = createTask({
     title: formData.get('title'), description: formData.get('description'), status: original?.status || 'todo',
     priority: formData.get('priority'), dueDate: formData.get('dueDate'), startTime: formData.get('startTime'), endTime: formData.get('endTime'),
-    estimatedDuration: formData.get('estimatedDuration'), projectId: formData.get('projectId'), tags: formData.get('tags'),
+    estimatedDuration: formData.get('estimatedDuration'), projectId: formData.get('projectId'), listId: formData.get('listId'), tags: formData.get('tags'),
     subtasks, notes: formData.get('notes'), recurrence: formData.get('recurrence'),
   });
   if (original) return { ...original, ...task, id: original.id, createdAt: original.createdAt, completedAt: original.completedAt };
@@ -196,7 +246,7 @@ function submitQuickAdd(form) {
     startTime: form.elements.startTime.value || parsed.time,
     priority: form.elements.priority.value,
     projectId: form.elements.projectId.value,
-    tags: form.elements.tags.value,
+    listId: form.elements.listId.value,
     recurrence: parsed.recurrence,
   });
   if (!task.title) return;
@@ -261,11 +311,55 @@ function duplicateTask(taskId) {
 function submitProject(form) {
   const fields = new FormData(form);
   const id = String(fields.get('id') || '');
-  const project = { id: id || newId('project'), name: String(fields.get('name')).trim(), description: String(fields.get('description') || '').trim(), color: fields.get('color'), deadline: fields.get('deadline') || '', icon: 'projects', createdAt: id ? getData().projects.find(item => item.id === id)?.createdAt : new Date().toISOString(), demo: false };
+  const quick = form.dataset.form === 'quick-project';
+  const project = { id: id || newId('project'), name: String(fields.get('name') || '').trim() || '未命名專案', description: String(fields.get('description') || '').trim(), color: fields.get('color') || '#6674b8', deadline: fields.get('deadline') || '', icon: 'projects', createdAt: id ? getData().projects.find(item => item.id === id)?.createdAt : new Date().toISOString(), demo: false };
   updateData(data => { const index = data.projects.findIndex(item => item.id === id); if (index >= 0) data.projects[index] = project; else data.projects.push(project); });
   dialogRoot.querySelector('dialog')?.close();
   toast(id ? '專案已更新' : '專案已建立');
-  if (!id) setRoute(`project/${project.id}`); else render();
+  if (!quick && !id) setRoute(`project/${project.id}`); else render();
+}
+
+function submitList(form) {
+  const fields = new FormData(form);
+  const id = String(fields.get('id') || '');
+  const name = String(fields.get('name') || '').trim();
+  if (!name) return;
+  const current = id ? getData().lists.find(item => item.id === id) : null;
+  const list = { id: id || newId('list'), name, color: fields.get('color') || '#6574b8', system: current?.system || false, createdAt: current?.createdAt || new Date().toISOString() };
+  updateData(data => { const index = data.lists.findIndex(item => item.id === id); if (index >= 0) data.lists[index] = list; else data.lists.push(list); });
+  dialogRoot.querySelector('dialog')?.close();
+  toast(id ? '清單已更新' : '清單已建立');
+  render();
+}
+
+async function deleteList(id) {
+  const list = getData().lists.find(item => item.id === id);
+  if (!list || list.system || !await confirmDialog(`刪除「${list.name}」？清單中的任務會保留並移到收集箱。`)) return;
+  updateData(data => { data.lists = data.lists.filter(item => item.id !== id); data.tasks.forEach(task => { if (task.listId === id) task.listId = 'list-inbox'; }); });
+  toast('清單已刪除，任務已保留');
+  setRoute('lists');
+}
+
+function submitWidgetSettings(form) {
+  const fields = new FormData(form);
+  const item = homeLayout.items.find(entry => entry.id === fields.get('id'));
+  if (!item) return;
+  item.name = String(fields.get('name') || '').trim() || WIDGET_REGISTRY[item.type]?.name || '小工具';
+  if (item.type === 'countdown') item.config = { ...item.config, target: String(fields.get('target') || '').trim(), date: String(fields.get('date') || '') };
+  if (item.type === 'projectTasks') item.config = { ...item.config, projectId: String(fields.get('projectId') || '') };
+  if (item.type === 'goals') {
+    const selectedId = String(fields.get('goalId') || '');
+    const currentGoals = getData().goals || [];
+    let goalIndex = currentGoals.findIndex((goal, index) => (goal.id || `legacy-${index}`) === selectedId);
+    const existing = goalIndex >= 0 ? currentGoals[goalIndex] : null;
+    const goal = { ...existing, id: existing?.id || newId('goal'), name: String(fields.get('goalName') || '').trim() || '未命名目標', target: Math.max(1, Number(fields.get('target') || 1)), progress: Math.max(0, Number(fields.get('progress') || 0)) };
+    updateData(data => { data.goals ||= []; if (goalIndex >= 0) data.goals[goalIndex] = goal; else data.goals.push(goal); });
+    item.config = { ...item.config, goalId: goal.id };
+  }
+  saveHomeLayout();
+  dialogRoot.querySelector('dialog')?.close();
+  toast('小工具已更新');
+  render();
 }
 
 async function deleteProject(projectId) {
@@ -376,7 +470,24 @@ function timerTick() {
   if (clock) clock.textContent = display;
   const homeClock = document.getElementById('home-focus-clock');
   if (homeClock) homeClock.textContent = display;
+  const duration = Number(focus.durations[focus.mode] || 25) * 60000;
+  const progress = Math.max(0, Math.min(100, (1 - focus.remainingMs / duration) * 100));
+  document.querySelector('.focus-ring')?.style.setProperty('--focus-progress', `${progress}%`);
+  document.querySelector('.mini-focus-ring')?.style.setProperty('--focus-progress', `${progress}%`);
   if (focus.remainingMs <= 0) timerFinish();
+}
+
+function setFocusWheel(unit, value) {
+  if (focus.started || focus.running) return;
+  const current = Number(focus.durations[focus.mode] || 25);
+  const hour = Math.floor(current / 60);
+  const minute = current % 60;
+  let next = unit === 'hours' ? Number(value) * 60 + (Number(value) === 2 ? 0 : minute) : (hour === 2 && Number(value) > 0 ? 60 : hour * 60) + Number(value);
+  const max = focus.mode === 'focus' ? 120 : focus.mode === 'short' ? 60 : 90;
+  next = Math.max(1, Math.min(max, next));
+  focus.durations[focus.mode] = next;
+  focus.remainingMs = next * 60000;
+  saveFocus(); render();
 }
 
 async function handleAction(action, element) {
@@ -384,6 +495,7 @@ async function handleAction(action, element) {
   switch (action) {
     case 'navigate-projects': setRoute('projects'); break;
     case 'quick-add': openQuickAdd({ inbox: element.dataset.inbox === 'true', projectId: element.dataset.project || '', dueDate: element.dataset.date || (route === 'today' ? homeDate : '') }); break;
+    case 'quick-add-type': dialogRoot.querySelector('dialog')?.close(); openQuickAdd({ kind: element.dataset.type === 'project' ? 'project' : 'task' }); break;
     case 'open-task-form': openTaskEditor('', { inbox: element.dataset.inbox === 'true' }); break;
     case 'task-edit': dialogRoot.querySelector('dialog')?.close(); openTaskEditor(id); break;
     case 'task-detail': openTaskDetail(id); break;
@@ -401,6 +513,9 @@ async function handleAction(action, element) {
     case 'project-edit': openProjectForm(id); break;
     case 'project-delete': await deleteProject(id); break;
     case 'project-view': projectView = element.dataset.view; render(); break;
+    case 'list-add': openListForm(); break;
+    case 'list-edit': openListForm(id); break;
+    case 'list-delete': await deleteList(id); break;
     case 'habit-add': openHabitForm(); break;
     case 'habit-edit': openHabitForm(id); break;
     case 'habit-delete': await deleteHabit(id); break;
@@ -415,12 +530,18 @@ async function handleAction(action, element) {
     case 'home-month-shift': { const next = new Date(homeCalendarMonth); next.setDate(1); next.setMonth(next.getMonth() + Number(element.dataset.step)); homeCalendarMonth = next; render(); break; }
     case 'home-widget-edit': if (homeLayout.locked) { toast('首頁配置已鎖定，請先解除鎖定'); break; } homeEditMode = !homeEditMode; render(); break;
     case 'home-widget-lock': homeLayout.locked = !homeLayout.locked; if (homeLayout.locked) homeEditMode = false; saveHomeLayout(); render(); break;
-    case 'home-widget-move': { const index = homeLayout.order.indexOf(id); const nextIndex = index + Number(element.dataset.step); if (index >= 0 && nextIndex >= 0 && nextIndex < homeLayout.order.length) { [homeLayout.order[index], homeLayout.order[nextIndex]] = [homeLayout.order[nextIndex], homeLayout.order[index]]; saveHomeLayout(); render(); } break; }
-    case 'home-widget-size': homeLayout.sizes[id] = homeLayout.sizes[id] === 'wide' ? 'normal' : 'wide'; saveHomeLayout(); render(); break;
-    case 'home-widget-remove': homeLayout.hidden = [...new Set([...homeLayout.hidden, id])]; saveHomeLayout(); render(); break;
-    case 'home-widget-add': homeLayout.hidden = homeLayout.hidden.filter(item => item !== id); saveHomeLayout(); render(); break;
+    case 'home-widget-picker': openWidgetPicker(); break;
+    case 'home-widget-settings':
+    case 'home-widget-open-settings': openWidgetSettings(id); break;
+    case 'home-widget-size': if (matchMedia('(max-width: 700px)').matches) openWidgetSizePicker(id); else { const sizes = ['small','medium','large','full']; const item = homeLayout.items.find(entry => entry.id === id); if (item) item.size = sizes[(sizes.indexOf(item.size) + 1) % sizes.length]; saveHomeLayout(); render(); } break;
+    case 'home-widget-size-set': { const item = homeLayout.items.find(entry => entry.id === id); if (item) item.size = element.dataset.size; saveHomeLayout(); dialogRoot.querySelector('dialog')?.close(); render(); break; }
+    case 'home-widget-hide': homeLayout.hidden = [...new Set([...homeLayout.hidden, id])]; saveHomeLayout(); render(); break;
+    case 'home-widget-delete': homeLayout.items = homeLayout.items.filter(item => item.id !== id); homeLayout.hidden = homeLayout.hidden.filter(item => item !== id); saveHomeLayout(); render(); toast('已從首頁移除小工具'); break;
+    case 'home-widget-unhide': homeLayout.hidden = homeLayout.hidden.filter(item => item !== id); saveHomeLayout(); dialogRoot.querySelector('dialog')?.close(); render(); break;
+    case 'home-widget-add': { const type = element.dataset.type; if (WIDGET_REGISTRY[type] && !homeLayout.items.some(item => item.type === type)) { homeLayout.items.push(defaultWidget(type)); saveHomeLayout(); dialogRoot.querySelector('dialog')?.close(); homeEditMode = false; render(); toast('小工具已加入首頁'); } break; }
     case 'stats-range': statsRange = Number(element.dataset.range); render(); break;
     case 'focus-mode': timerChangeMode(element.dataset.mode); break;
+    case 'focus-duration-wheel': setFocusWheel(element.dataset.wheel, element.dataset.value); break;
     case 'focus-start': timerStart(); break;
     case 'focus-pause': timerPause(); break;
     case 'focus-reset': timerReset(); break;
@@ -450,7 +571,9 @@ function handleSubmit(event) {
   if (!form.reportValidity()) return;
   if (form.dataset.form === 'task') submitTask(form);
   if (form.dataset.form === 'quick-add') submitQuickAdd(form);
-  if (form.dataset.form === 'project') submitProject(form);
+  if (form.dataset.form === 'project' || form.dataset.form === 'quick-project') submitProject(form);
+  if (form.dataset.form === 'widget-settings') submitWidgetSettings(form);
+  if (form.dataset.form === 'list') submitList(form);
   if (form.dataset.form === 'habit') submitHabit(form);
 }
 
@@ -472,6 +595,10 @@ function handleChange(event) {
     const priority = target.value;
     updateData(data => data.tasks.forEach(task => { if (selectedTasks.has(task.id)) task.priority = priority; }));
     selectedTasks.clear(); toast('優先級已更新'); render(); return;
+  }
+  if (target.matches('[data-task-priority]')) {
+    updateData(data => { const task = data.tasks.find(item => item.id === target.dataset.taskPriority); if (task) task.priority = target.value === 'none' ? '' : target.value; });
+    toast('優先級已更新'); openTaskDetail(target.dataset.taskPriority); return;
   }
   if (target.matches('[data-task-status]')) return;
   if (target.matches('[data-select-task]')) {
@@ -497,8 +624,48 @@ function handleClick(event) {
   const link = event.target.closest('[data-navigate]');
   if (link) { event.preventDefault(); dialogRoot.querySelector('dialog')?.close(); setRoute(link.dataset.navigate); return; }
   const actionElement = event.target.closest('[data-action]');
+  if (actionElement?.matches('[data-widget-resize]') && Date.now() < suppressWidgetResizeClickUntil) return;
   if (actionElement) handleAction(actionElement.dataset.action, actionElement);
 }
+
+app.addEventListener('pointerdown', event => {
+  const handle = event.target.closest('[data-widget-resize]');
+  if (!handle || homeLayout.locked) return;
+  widgetResizeStart = { id: handle.dataset.id, x: event.clientX };
+});
+window.addEventListener('pointerup', event => {
+  if (!widgetResizeStart) return;
+  const dx = event.clientX - widgetResizeStart.x;
+  const id = widgetResizeStart.id;
+  widgetResizeStart = null;
+  if (Math.abs(dx) < 28 || matchMedia('(max-width: 700px)').matches) return;
+  const item = homeLayout.items.find(entry => entry.id === id);
+  if (!item) return;
+  const sizes = ['small','medium','large','full'];
+  item.size = sizes[Math.max(0, Math.min(sizes.length - 1, sizes.indexOf(item.size) + (dx > 0 ? 1 : -1)))];
+  suppressWidgetResizeClickUntil = Date.now() + 450;
+  saveHomeLayout(); render();
+});
+
+document.addEventListener('wheel', event => {
+  const wheel = event.target.closest?.('.focus-wheel');
+  if (wheel) userScrolledFocusWheels.add(wheel);
+}, true);
+document.addEventListener('pointerdown', event => {
+  const wheel = event.target.closest?.('.focus-wheel');
+  if (wheel) userScrolledFocusWheels.add(wheel);
+}, true);
+document.addEventListener('scroll', event => {
+  const wheel = event.target.closest?.('.focus-wheel');
+  if (!wheel || !userScrolledFocusWheels.has(wheel) || focus.started || focus.running) return;
+  clearTimeout(focusWheelScrollTimer);
+  focusWheelScrollTimer = setTimeout(() => {
+    userScrolledFocusWheels.delete(wheel);
+    const center = wheel.getBoundingClientRect().top + wheel.clientHeight / 2;
+    const closest = [...wheel.querySelectorAll('[data-value]')].sort((a, b) => Math.abs(a.getBoundingClientRect().top + a.offsetHeight / 2 - center) - Math.abs(b.getBoundingClientRect().top + b.offsetHeight / 2 - center))[0];
+    if (closest) setFocusWheel(wheel.getAttribute('aria-label') === '小時' ? 'hours' : 'minutes', closest.dataset.value);
+  }, 120);
+}, true);
 
 function handleFile(event) {
   const input = event.target.closest('[data-action="import-data"]');
@@ -516,6 +683,15 @@ function handleFile(event) {
 }
 
 function handleDragStart(event) {
+  const widgetHandle = event.target.closest('[data-widget-drag]');
+  if (widgetHandle) {
+    if (homeLayout.locked) { event.preventDefault(); return; }
+    draggedWidgetId = widgetHandle.dataset.widgetDrag;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/dayflow-widget', draggedWidgetId);
+    widgetHandle.closest('[data-widget]')?.classList.add('is-dragging');
+    return;
+  }
   const card = event.target.closest('[data-task-id]');
   if (!card) return;
   draggedTaskId = card.dataset.taskId;
@@ -524,10 +700,24 @@ function handleDragStart(event) {
   card.classList.add('is-dragging');
 }
 
-function handleDragEnd(event) { event.target.closest('[data-task-id]')?.classList.remove('is-dragging'); draggedTaskId = ''; }
-function handleDragOver(event) { if (event.target.closest('[data-drop-date],[data-task-id],[data-status-column]')) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; } }
+function handleDragEnd(event) { event.target.closest('[data-task-id]')?.classList.remove('is-dragging'); event.target.closest('[data-widget]')?.classList.remove('is-dragging'); document.querySelectorAll('.is-drop-target').forEach(node => node.classList.remove('is-drop-target')); draggedTaskId = ''; draggedWidgetId = ''; }
+function handleDragOver(event) {
+  const widget = event.target.closest('[data-widget]');
+  if (draggedWidgetId && widget && widget.dataset.widget !== draggedWidgetId) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; widget.classList.add('is-drop-target'); return; }
+  if (event.target.closest('[data-drop-date],[data-task-id],[data-status-column]')) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; }
+}
 
 function handleDrop(event) {
+  const widgetId = draggedWidgetId || event.dataTransfer.getData('text/dayflow-widget');
+  if (widgetId) {
+    const target = event.target.closest('[data-widget]');
+    if (!target || target.dataset.widget === widgetId) return;
+    event.preventDefault();
+    const from = homeLayout.items.findIndex(item => item.id === widgetId);
+    const to = homeLayout.items.findIndex(item => item.id === target.dataset.widget);
+    if (from >= 0 && to >= 0) { const [item] = homeLayout.items.splice(from, 1); homeLayout.items.splice(to, 0, item); saveHomeLayout(); render(); }
+    return;
+  }
   const taskId = draggedTaskId || event.dataTransfer.getData('text/plain');
   if (!taskId) return;
   const dateTarget = event.target.closest('[data-drop-date]');

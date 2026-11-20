@@ -3,6 +3,11 @@ import { addDays, dateKey, DAY } from './dates.js';
 const DATA_KEY = 'dayflow.data.v1';
 const UI_KEY = 'dayflow.ui.v1';
 const VERSION = 1;
+const DEFAULT_LISTS = [
+  { id: 'list-inbox', name: '待整理', color: '#9299a5', system: true },
+  { id: 'list-work', name: '工作', color: '#6574b8', system: true },
+  { id: 'list-personal', name: '個人', color: '#5b9279', system: true },
+];
 
 function makeSeedData() {
   const today = dateKey();
@@ -52,8 +57,10 @@ function normalizeData(value) {
   if (!value || typeof value !== 'object') return seed;
   return {
     version: VERSION,
-    tasks: Array.isArray(value.tasks) ? value.tasks : [],
+    tasks: Array.isArray(value.tasks) ? value.tasks.map(task => ({ ...task, listId: String(task.listId || '') })) : [],
     projects: Array.isArray(value.projects) ? value.projects : [],
+    lists: Array.isArray(value.lists) ? value.lists : structuredClone(DEFAULT_LISTS),
+    goals: Array.isArray(value.goals) ? value.goals : [],
     habits: Array.isArray(value.habits) ? value.habits : [],
     focusSessions: Array.isArray(value.focusSessions) ? value.focusSessions : [],
     settings: { ...seed.settings, ...(value.settings && typeof value.settings === 'object' ? value.settings : {}) },
@@ -110,8 +117,8 @@ export function createTask(input = {}) {
   const now = new Date().toISOString();
   return {
     id: newId('task'), title: String(input.title || '').trim(), description: input.description || '',
-    status: input.status || 'todo', priority: input.priority || data.settings.defaultPriority || 'p3',
-    dueDate: input.dueDate || '', startTime: input.startTime || '', endTime: input.endTime || '',
+    status: input.status || 'todo', priority: input.priority ?? data.settings.defaultPriority ?? 'p3',
+    dueDate: input.dueDate || '', startTime: input.startTime || '', endTime: input.endTime || '', listId: input.listId || '',
     estimatedDuration: Number(input.estimatedDuration) || 25, projectId: input.projectId || '',
     tags: Array.isArray(input.tags) ? input.tags : String(input.tags || '').split(',').map(tag => tag.trim()).filter(Boolean),
     subtasks: Array.isArray(input.subtasks) ? input.subtasks : [], notes: input.notes || '',
@@ -138,6 +145,8 @@ export function resetDemoData() {
   demo.habits.push(...keep('habits'));
   demo.focusSessions.push(...keep('focusSessions'));
   demo.projects = [...demo.projects, ...current.projects.filter(item => !item.demo)];
+  demo.lists = current.lists?.length ? current.lists : structuredClone(DEFAULT_LISTS);
+  demo.goals = current.goals || [];
   return saveData(demo);
 }
 
