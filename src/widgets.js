@@ -93,13 +93,17 @@ export const WIDGET_TYPES = Object.keys(WIDGET_REGISTRY);
 export const WIDGET_CATEGORIES = [...new Set(Object.values(WIDGET_REGISTRY).map(item => item.category))];
 export const defaultWidget = (type, id = `${type}-${globalThis.crypto?.randomUUID?.() || Date.now().toString(36)}`) => ({ id, type, name: WIDGET_REGISTRY[type]?.name || type, size: WIDGET_REGISTRY[type]?.size || 'medium', config: {} });
 
-export function createHomeLayout(stored = {}) {
-  const defaults = [
-    defaultWidget('inbox', 'inbox'),
-    defaultWidget('focusTimer', 'focus'),
-    defaultWidget('calendar', 'calendar'),
-    defaultWidget('lists', 'lists'),
-  ];
+const layoutSeeds = {
+  desktop: [defaultWidget('calendar', 'calendar'), defaultWidget('focusTimer', 'focus'), defaultWidget('inbox', 'inbox'), defaultWidget('habits', 'habits')]
+    .map(item => ({ ...item, size: ({ calendar: 'large', focusTimer: 'medium', inbox: 'small', habits: 'small' })[item.type] })),
+  tablet: [defaultWidget('calendar', 'calendar'), defaultWidget('inbox', 'inbox'), defaultWidget('focusTimer', 'focus')]
+    .map(item => ({ ...item, size: 'medium' })),
+  mobile: [defaultWidget('calendar', 'calendar'), defaultWidget('focusTimer', 'focus'), defaultWidget('inbox', 'inbox')]
+    .map(item => ({ ...item, size: 'small' })),
+};
+
+function normalizeLayout(stored = {}, device = 'desktop') {
+  const defaults = layoutSeeds[device];
   const normalizeType = type => type === 'focus' ? 'focusTimer' : type === 'upcoming' ? 'calendar' : type;
   if (Array.isArray(stored.items)) {
     const seen = new Set();
@@ -110,7 +114,7 @@ export function createHomeLayout(stored = {}) {
       const name = item.type === 'focus' && item.name === 'focus' ? WIDGET_REGISTRY[type].name : item.type === 'upcoming' && item.name === WIDGET_REGISTRY.upcoming.name ? WIDGET_REGISTRY[type].name : item.name;
       return [{ ...defaultWidget(type, item.id || undefined), ...item, type, name: name || WIDGET_REGISTRY[type].name, config: { ...(item.config || {}) } }];
     });
-    return { items, hidden: Array.isArray(stored.hidden) ? stored.hidden : [], locked: Boolean(stored.locked) };
+    return { items, hidden: Array.isArray(stored.hidden) ? stored.hidden.filter(id => items.some(item => item.id === id)) : [], locked: Boolean(stored.locked) };
   }
   const oldOrder = Array.isArray(stored.order) ? stored.order : [];
   const oldHidden = Array.isArray(stored.hidden) ? stored.hidden : [];
@@ -128,12 +132,29 @@ export function createHomeLayout(stored = {}) {
   return { items, hidden: [...new Set(hidden)], locked: Boolean(stored.locked) };
 }
 
+export function createHomeLayout(stored = {}, device = 'desktop') {
+  return normalizeLayout(stored, device);
+}
+
+export function createHomeLayouts(stored = {}) {
+  const layouts = {};
+  for (const device of Object.keys(layoutSeeds)) {
+    const entry = stored.layouts?.[device] || (device === 'desktop' && !stored.layouts ? stored : {});
+    layouts[device] = normalizeLayout(entry, device);
+  }
+  return layouts;
+}
+
+export function defaultHomeLayouts() {
+  return createHomeLayouts();
+}
+
 export function renderHomeWidgets(data, context) {
   const layout = context.homeLayout;
   return layout.items.filter(item => !layout.hidden.includes(item.id)).map((item, index) => {
     const definition = WIDGET_REGISTRY[item.type] || WIDGET_REGISTRY.today;
-    const controls = context.homeEditMode ? `<div class="widget-edit-controls"><button class="icon-button widget-drag-handle" draggable="true" data-widget-drag="${escapeHTML(item.id)}" aria-label="拖曳移動${escapeHTML(item.name)}">⠿</button><button class="button button-small" data-action="home-widget-size" data-id="${escapeHTML(item.id)}">${({ small: '小', medium: '中', large: '大', full: '全寬' })[item.size] || '中'}</button><button class="icon-button" data-action="home-widget-settings" data-id="${escapeHTML(item.id)}" aria-label="設定${escapeHTML(item.name)}">${icon('settings')}</button><button class="icon-button" data-action="home-widget-hide" data-id="${escapeHTML(item.id)}" aria-label="隱藏${escapeHTML(item.name)}">⌑</button><button class="icon-button" data-action="home-widget-delete" data-id="${escapeHTML(item.id)}" aria-label="移除首頁上的${escapeHTML(item.name)}">×</button></div>` : '';
-    return `<section class="panel home-widget-card size-${escapeHTML(item.size || 'medium')} ${context.homeEditMode ? 'is-editable' : ''}" data-widget="${escapeHTML(item.id)}" data-widget-type="${escapeHTML(item.type)}" ${context.homeEditMode ? `data-widget-index="${index}"` : ''}><div class="home-widget-card-heading"><div><p class="eyebrow">${escapeHTML(definition.category)}</p><button class="widget-title" data-action="home-widget-open-settings" data-id="${escapeHTML(item.id)}"><h3>${escapeHTML(item.name || definition.name)}</h3></button></div>${controls}</div><div class="home-widget-content">${definition.render(item.type, data, context, item)}</div>${context.homeEditMode ? '<span class="widget-resize-handle" data-widget-resize="true" data-action="home-widget-size" data-id="' + escapeHTML(item.id) + '" aria-label="調整小工具尺寸"></span>' : ''}</section>`;
+    const controls = context.homeEditMode ? `<div class="widget-edit-controls"><button class="button button-small" data-action="home-widget-size" data-id="${escapeHTML(item.id)}" aria-label="調整${escapeHTML(item.name)}尺寸">${({ small: '小', medium: '中', large: '大', full: '全寬' })[item.size] || '中'}</button><button class="icon-button" data-action="home-widget-settings" data-id="${escapeHTML(item.id)}" aria-label="設定${escapeHTML(item.name)}">${icon('settings')}</button><button class="icon-button" data-action="home-widget-hide" data-id="${escapeHTML(item.id)}" aria-label="隱藏${escapeHTML(item.name)}">⌑</button><button class="icon-button" data-action="home-widget-delete" data-id="${escapeHTML(item.id)}" aria-label="移除首頁上的${escapeHTML(item.name)}">×</button></div>` : '';
+    return `<section class="panel home-widget-card size-${escapeHTML(item.size || 'medium')} ${context.homeEditMode ? 'is-editable' : ''}" data-widget="${escapeHTML(item.id)}" data-widget-type="${escapeHTML(item.type)}" data-size="${escapeHTML(item.size || 'medium')}" aria-label="${escapeHTML(item.name || definition.name)}"><div class="home-widget-card-heading"><div><p class="eyebrow">${escapeHTML(definition.category)}</p><h3>${escapeHTML(item.name || definition.name)}</h3></div>${controls}</div><div class="home-widget-content">${definition.render(item.type, data, context, item)}</div><span class="widget-resize-handle" data-widget-resize="true" data-id="${escapeHTML(item.id)}" role="slider" tabindex="0" aria-label="調整${escapeHTML(item.name)}大小" aria-valuetext="${({ small: '小', medium: '中', large: '大', full: '全寬' })[item.size] || '中'}"></span></section>`;
   }).join('');
 }
 

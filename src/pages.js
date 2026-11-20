@@ -32,6 +32,11 @@ function renderToday(data, context) {
   const rate = tasks.length ? Math.round(completed / tasks.length * 100) : 0;
   const homeWidgets = renderHomeWidgets(data, context);
   return `<div class="home-swipe-region ${context.homeTransitionDirection > 0 ? 'shift-next' : context.homeTransitionDirection < 0 ? 'shift-previous' : ''}">
+    <section class="panel home-task-card" aria-labelledby="home-task-heading">
+      <div class="home-task-heading"><div><p class="eyebrow">${key === today() ? '今天' : escapeHTML(dayLabel(key))}</p><h1 id="home-task-heading" aria-live="polite">${escapeHTML(formatDate(key, { weekday: true, year: true }))}</h1><p class="muted home-swipe-hint">${escapeHTML(`${completed} / ${tasks.length} 項完成`)}<span> · 左右滑動切換日期</span></p></div><button class="button button-primary" data-action="quick-add" data-date="${escapeHTML(key)}">${icon('plus')}新增待辦</button></div>
+      <div class="home-progress" role="progressbar" aria-label="當日待辦完成進度" aria-valuenow="${rate}" aria-valuemin="0" aria-valuemax="100"><span style="width:${rate}%"></span></div>
+      ${tasks.length ? `<div class="task-list today-task-list">${tasks.map(task => renderTask(task, data, { home: true })).join('')}</div>` : `<div class="home-empty"><span class="home-empty-mark">${icon('today')}</span><strong>這天還沒有待辦事項</strong><span>把要做的事先放進清單。</span><button class="button" data-action="quick-add" data-date="${escapeHTML(key)}">${icon('plus')}新增第一項</button></div>`}
+    </section>
     <section class="home-date-card" aria-label="日期與時間">
       <div class="home-date-side">
         <span class="home-kicker">現在時間</span><time id="home-clock" class="home-clock">${escapeHTML(formatClock())}</time>
@@ -43,14 +48,9 @@ function renderToday(data, context) {
         ${renderHomeMonth(data, context.homeCalendarMonth || selectedDate)}
       </div>
     </section>
-    <section class="panel home-task-card" aria-labelledby="home-task-heading">
-      <div class="home-task-heading"><div><p class="eyebrow">${key === today() ? '今天' : escapeHTML(dayLabel(key))}</p><h1 id="home-task-heading" aria-live="polite">${escapeHTML(formatDate(key, { weekday: true, year: true }))}</h1><p class="muted home-swipe-hint">${escapeHTML(`${completed} / ${tasks.length} 項完成`)}<span> · 左右滑動切換日期</span></p></div><button class="button button-primary" data-action="quick-add" data-date="${escapeHTML(key)}">${icon('plus')}新增待辦</button></div>
-      <div class="home-progress" role="progressbar" aria-label="當日待辦完成進度" aria-valuenow="${rate}" aria-valuemin="0" aria-valuemax="100"><span style="width:${rate}%"></span></div>
-      ${tasks.length ? `<div class="task-list today-task-list">${tasks.map(task => renderTask(task, data, { home: true })).join('')}</div>` : `<div class="home-empty"><span class="home-empty-mark">${icon('today')}</span><strong>這天還沒有待辦事項</strong><span>把要做的事先放進清單。</span><button class="button" data-action="quick-add" data-date="${escapeHTML(key)}">${icon('plus')}新增第一項</button></div>`}
-    </section>
     <section class="home-widgets-section" aria-label="首頁小工具">
-      <div class="home-widgets-heading"><div><p class="eyebrow">你的首頁</p><h2>小工具</h2></div><div class="home-widget-tools">${context.homeLayout.locked ? `<button class="button button-small is-locked" data-action="home-widget-lock">解除鎖定</button>` : `<button class="button button-small" data-action="home-widget-edit">${context.homeEditMode ? '完成編輯' : '編輯版面'}</button>`}${context.homeEditMode ? `<button class="button button-small" data-action="home-widget-lock">鎖定配置</button>` : ''}</div></div>
-      <div class="home-widgets">${homeWidgets}</div><button class="button add-widget-button" data-action="home-widget-picker">${icon('plus')}新增小工具</button>
+      <div class="home-widgets-heading"><div><p class="eyebrow">依裝置獨立保存</p><h2>首頁模組</h2></div><div class="home-widget-toolbar"><div class="layout-device-switch" role="group" aria-label="選擇要編輯的裝置版面">${[['desktop','桌機'],['tablet','平板'],['mobile','手機']].map(([device, label]) => `<button class="layout-device-button ${context.layoutDevice === device ? 'is-active' : ''}" data-action="home-layout-device" data-device="${device}" aria-pressed="${context.layoutDevice === device}">${label}</button>`).join('')}</div><div class="home-widget-tools">${context.homeLayout.locked ? `<button class="button button-small is-locked" data-action="home-widget-lock">解除鎖定</button>` : `<button class="button button-small" data-action="home-widget-edit">${context.homeEditMode ? '完成' : '管理'}</button>`}<button class="icon-button" data-action="home-layout-reset" aria-label="重置${context.layoutDevice === 'mobile' ? '手機' : context.layoutDevice === 'tablet' ? '平板' : '桌機'}版面" title="重置目前裝置版面">↺</button>${context.homeEditMode && !context.homeLayout.locked ? `<button class="button button-small" data-action="home-widget-lock">鎖定</button>` : ''}</div></div></div>
+      <div class="home-widgets" data-layout-device="${context.layoutDevice}" aria-label="${context.layoutDevice === 'mobile' ? '手機' : context.layoutDevice === 'tablet' ? '平板' : '桌機'}首頁模組">${homeWidgets}</div><button class="button add-widget-button" data-action="home-widget-picker">${icon('plus')}新增模組</button>
     </section>
   </div>`;
 }

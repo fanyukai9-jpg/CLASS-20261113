@@ -2,7 +2,7 @@ import { addDays, dateKey, formatDate, formatTime, getGreeting, parseDate, parse
 import { clearAllData, clearDemoData, createTask, exportData, getData, getUIState, importData, newId, resetDemoData, updateData, updateUI } from './data.js';
 import { icon, renderTaskForm, statusLabels } from './components.js';
 import { renderPage } from './pages.js';
-import { createHomeLayout, defaultWidget, renderWidgetPicker, WIDGET_REGISTRY } from './widgets.js';
+import { createHomeLayouts, defaultHomeLayouts, defaultWidget, renderWidgetPicker, WIDGET_REGISTRY } from './widgets.js';
 import { confirmDialog, escapeHTML, openDialog, toast } from './ui.js';
 
 const app = document.getElementById('app');
@@ -20,6 +20,10 @@ let query = '';
 let draggedTaskId = '';
 let draggedWidgetId = '';
 let widgetResizeStart = null;
+let widgetPointerStart = null;
+let widgetPressTimer = 0;
+let widgetDragSession = null;
+let layoutUndo = null;
 let suppressWidgetResizeClickUntil = 0;
 let focusWheelScrollTimer;
 const userScrolledFocusWheels = new WeakSet();
@@ -30,18 +34,52 @@ let homeCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth()
 let drawerOpen = false;
 let homeEditMode = false;
 let homeTransitionDirection = 0;
-let homeLayout = loadHomeLayout();
+let layoutPreviewDevice = null;
+let homeLayouts = loadHomeLayouts();
+let homeLayout = homeLayouts[activeLayoutDevice()];
 
-function loadHomeLayout() {
-  try { return createHomeLayout(JSON.parse(localStorage.getItem('dayflow.home-layout.v2') || localStorage.getItem('dayflow.home-layout.v1') || '{}')); }
-  catch { return createHomeLayout(); }
+function detectLayoutDevice() {
+  return matchMedia('(max-width: 700px)').matches ? 'mobile' : matchMedia('(max-width: 1023px)').matches ? 'tablet' : 'desktop';
+}
+
+function activeLayoutDevice() {
+  return layoutPreviewDevice || detectLayoutDevice();
+}
+
+function loadHomeLayouts() {
+  try {
+    const saved = localStorage.getItem('dayflow.home-layout.v3') || localStorage.getItem('dayflow.home-layout.v2') || localStorage.getItem('dayflow.home-layout.v1');
+    return createHomeLayouts(saved ? JSON.parse(saved) : {});
+  } catch { return defaultHomeLayouts(); }
 }
 
 function saveHomeLayout() {
   try {
-    localStorage.setItem('dayflow.home-layout.v2', JSON.stringify(homeLayout));
-    localStorage.setItem('dayflow.home-layout.v1', JSON.stringify({ order: homeLayout.items.map(item => item.id), hidden: homeLayout.hidden, sizes: Object.fromEntries(homeLayout.items.map(item => [item.id, item.size])), locked: homeLayout.locked }));
+    homeLayouts[activeLayoutDevice()] = homeLayout;
+    localStorage.setItem('dayflow.home-layout.v3', JSON.stringify({ layouts: homeLayouts }));
   } catch { /* The home arrangement is optional. */ }
+}
+
+function rememberLayoutUndo() {
+  layoutUndo = { device: activeLayoutDevice(), layout: JSON.parse(JSON.stringify(homeLayout)) };
+}
+
+function showLayoutUndo(message) {
+  const snapshot = layoutUndo;
+  if (!snapshot) { toast(message); return; }
+  toast(message, 'success', { label: '復原', run: () => {
+    homeLayouts[snapshot.device] = snapshot.layout;
+    if (activeLayoutDevice() === snapshot.device) homeLayout = homeLayouts[snapshot.device];
+    saveHomeLayout(); render();
+  } });
+}
+
+function setLayoutDevice(device) {
+  if (!homeLayouts[device]) return;
+  layoutPreviewDevice = device === detectLayoutDevice() ? null : device;
+  homeLayout = homeLayouts[device];
+  homeEditMode = false;
+  render();
 }
 
 function loadFocus() {
@@ -56,7 +94,7 @@ function saveFocus() {
 
 function context() {
   if (focus.running) focus.remainingMs = Math.max(0, focus.endAt - Date.now());
-  return { greeting: getGreeting(), filters, taskView, projectView, calendarDate, calendarMode, statsRange, query, focus, homeDate, homeCalendarMonth, homeLayout, homeEditMode, homeTransitionDirection };
+  return { greeting: getGreeting(), filters, taskView, projectView, calendarDate, calendarMode, statsRange, query, focus, homeDate, homeCalendarMonth, homeLayout, homeEditMode, homeTransitionDirection, layoutDevice: activeLayoutDevice() };
 }
 
 function render() {
@@ -528,17 +566,24 @@ async function handleAction(action, element) {
     case 'calendar-add': openQuickAdd({ dueDate: element.dataset.date }); break;
     case 'home-date-today': homeDate = dateKey(); homeCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12); render(); break;
     case 'home-month-shift': { const next = new Date(homeCalendarMonth); next.setDate(1); next.setMonth(next.getMonth() + Number(element.dataset.step)); homeCalendarMonth = next; render(); break; }
+    case 'home-layout-device': setLayoutDevice(element.dataset.device); break;
+    case 'home-layout-reset': {
+      const device = activeLayoutDevice();
+      rememberLayoutUndo();
+      homeLayouts[device] = defaultHomeLayouts()[device]; homeLayout = homeLayouts[device];
+      saveHomeLayout(); render(); showLayoutUndo('已重置目前裝置版面'); break;
+    }
     case 'home-widget-edit': if (homeLayout.locked) { toast('首頁配置已鎖定，請先解除鎖定'); break; } homeEditMode = !homeEditMode; render(); break;
     case 'home-widget-lock': homeLayout.locked = !homeLayout.locked; if (homeLayout.locked) homeEditMode = false; saveHomeLayout(); render(); break;
     case 'home-widget-picker': openWidgetPicker(); break;
     case 'home-widget-settings':
     case 'home-widget-open-settings': openWidgetSettings(id); break;
-    case 'home-widget-size': if (matchMedia('(max-width: 700px)').matches) openWidgetSizePicker(id); else { const sizes = ['small','medium','large','full']; const item = homeLayout.items.find(entry => entry.id === id); if (item) item.size = sizes[(sizes.indexOf(item.size) + 1) % sizes.length]; saveHomeLayout(); render(); } break;
-    case 'home-widget-size-set': { const item = homeLayout.items.find(entry => entry.id === id); if (item) item.size = element.dataset.size; saveHomeLayout(); dialogRoot.querySelector('dialog')?.close(); render(); break; }
-    case 'home-widget-hide': homeLayout.hidden = [...new Set([...homeLayout.hidden, id])]; saveHomeLayout(); render(); break;
-    case 'home-widget-delete': homeLayout.items = homeLayout.items.filter(item => item.id !== id); homeLayout.hidden = homeLayout.hidden.filter(item => item !== id); saveHomeLayout(); render(); toast('已從首頁移除小工具'); break;
-    case 'home-widget-unhide': homeLayout.hidden = homeLayout.hidden.filter(item => item !== id); saveHomeLayout(); dialogRoot.querySelector('dialog')?.close(); render(); break;
-    case 'home-widget-add': { const type = element.dataset.type; if (WIDGET_REGISTRY[type] && !homeLayout.items.some(item => item.type === type)) { homeLayout.items.push(defaultWidget(type)); saveHomeLayout(); dialogRoot.querySelector('dialog')?.close(); homeEditMode = false; render(); toast('小工具已加入首頁'); } break; }
+    case 'home-widget-size': if (activeLayoutDevice() === 'mobile') openWidgetSizePicker(id); else { const sizes = ['small','medium','large','full']; const item = homeLayout.items.find(entry => entry.id === id); if (item) { rememberLayoutUndo(); item.size = sizes[(sizes.indexOf(item.size) + 1) % sizes.length]; saveHomeLayout(); render(); showLayoutUndo('小工具尺寸已更新'); } } break;
+    case 'home-widget-size-set': { const item = homeLayout.items.find(entry => entry.id === id); if (item) { rememberLayoutUndo(); item.size = element.dataset.size; } saveHomeLayout(); dialogRoot.querySelector('dialog')?.close(); render(); showLayoutUndo('小工具尺寸已更新'); break; }
+    case 'home-widget-hide': rememberLayoutUndo(); homeLayout.hidden = [...new Set([...homeLayout.hidden, id])]; saveHomeLayout(); render(); showLayoutUndo('已隱藏模組'); break;
+    case 'home-widget-delete': rememberLayoutUndo(); homeLayout.items = homeLayout.items.filter(item => item.id !== id); homeLayout.hidden = homeLayout.hidden.filter(item => item !== id); saveHomeLayout(); render(); showLayoutUndo('已從首頁移除小工具'); break;
+    case 'home-widget-unhide': rememberLayoutUndo(); homeLayout.hidden = homeLayout.hidden.filter(item => item !== id); saveHomeLayout(); dialogRoot.querySelector('dialog')?.close(); render(); showLayoutUndo('已顯示模組'); break;
+    case 'home-widget-add': { const type = element.dataset.type; if (WIDGET_REGISTRY[type] && !homeLayout.items.some(item => item.type === type)) { rememberLayoutUndo(); const item = defaultWidget(type); if (activeLayoutDevice() === 'mobile') item.size = 'small'; homeLayout.items.push(item); saveHomeLayout(); dialogRoot.querySelector('dialog')?.close(); homeEditMode = false; render(); showLayoutUndo('已加入首頁模組'); } break; }
     case 'stats-range': statsRange = Number(element.dataset.range); render(); break;
     case 'focus-mode': timerChangeMode(element.dataset.mode); break;
     case 'focus-duration-wheel': setFocusWheel(element.dataset.wheel, element.dataset.value); break;
@@ -630,22 +675,152 @@ function handleClick(event) {
 
 app.addEventListener('pointerdown', event => {
   const handle = event.target.closest('[data-widget-resize]');
-  if (!handle || homeLayout.locked) return;
-  widgetResizeStart = { id: handle.dataset.id, x: event.clientX };
-});
-window.addEventListener('pointerup', event => {
-  if (!widgetResizeStart) return;
-  const dx = event.clientX - widgetResizeStart.x;
-  const id = widgetResizeStart.id;
-  widgetResizeStart = null;
-  if (Math.abs(dx) < 28 || matchMedia('(max-width: 700px)').matches) return;
-  const item = homeLayout.items.find(entry => entry.id === id);
-  if (!item) return;
-  const sizes = ['small','medium','large','full'];
-  item.size = sizes[Math.max(0, Math.min(sizes.length - 1, sizes.indexOf(item.size) + (dx > 0 ? 1 : -1)))];
-  suppressWidgetResizeClickUntil = Date.now() + 450;
-  saveHomeLayout(); render();
-});
+  if (handle) {
+    if (homeLayout.locked || activeLayoutDevice() === 'mobile') return;
+    const card = handle.closest('.home-widget-card');
+    const item = homeLayout.items.find(entry => entry.id === handle.dataset.id);
+    if (!card || !item) return;
+    event.preventDefault(); event.stopPropagation();
+    rememberLayoutUndo();
+    widgetResizeStart = { id: item.id, pointerId: event.pointerId, card, startX: event.clientX, startWidth: card.getBoundingClientRect().width, originalSize: item.size, device: activeLayoutDevice() };
+    if (event.isTrusted) handle.setPointerCapture?.(event.pointerId);
+    card.classList.add('is-resizing');
+    return;
+  }
+  const card = event.target.closest('.home-widget-card');
+  if (!card || route !== 'today' || drawerOpen || document.querySelector('dialog[open]') || homeLayout.locked) return;
+  if (event.target.closest('button,a,input,textarea,select,[contenteditable="true"],[data-widget-resize]')) return;
+  if (event.pointerType === 'mouse' && event.button !== 0) return;
+  widgetPointerStart = { pointerId: event.pointerId, card, x: event.clientX, y: event.clientY, pointerType: event.pointerType, pointerTrusted: event.isTrusted };
+  if (event.pointerType === 'mouse') beginWidgetDrag(event.clientX, event.clientY);
+  else widgetPressTimer = window.setTimeout(() => {
+    if (!widgetPointerStart || widgetPointerStart.pointerId !== event.pointerId) return;
+    beginWidgetDrag(widgetPointerStart.x, widgetPointerStart.y);
+  }, 380);
+}, { passive: false });
+
+function beginWidgetDrag(x, y) {
+  const start = widgetPointerStart;
+  if (!start || widgetDragSession || homeLayout.locked) return;
+  const card = start.card;
+  const grid = card.closest('.home-widgets');
+  const rect = card.getBoundingClientRect();
+  const placeholder = document.createElement('div');
+  placeholder.className = `widget-drop-placeholder size-${card.dataset.size || 'medium'}`;
+  placeholder.dataset.size = card.dataset.size || 'medium';
+  placeholder.setAttribute('aria-hidden', 'true');
+  placeholder.style.height = `${rect.height}px`;
+  const preview = card.cloneNode(true);
+  preview.removeAttribute('id'); preview.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
+  preview.setAttribute('aria-hidden', 'true');
+  preview.classList.add('is-floating');
+  Object.assign(preview.style, { position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`, zIndex: '1000', pointerEvents: 'none', margin: '0', transform: 'translate3d(0,0,0) scale(1.025)' });
+  if (start.pointerTrusted) card.setPointerCapture?.(start.pointerId);
+  card.replaceWith(placeholder);
+  document.body.append(preview);
+  grid.classList.add('is-reordering');
+  document.body.classList.add('widget-drag-active');
+  widgetDragSession = { id: card.dataset.widget, card, grid, placeholder, preview, startX: x, startY: y, dx: 0, dy: 0, device: activeLayoutDevice() };
+}
+
+function handleWidgetPointerMove(event) {
+  const start = widgetPointerStart;
+  if (!start || event.pointerId !== start.pointerId) return;
+  if (!widgetDragSession) {
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 9) {
+      clearTimeout(widgetPressTimer); widgetPressTimer = 0; widgetPointerStart = null;
+    }
+    return;
+  }
+  event.preventDefault();
+  const session = widgetDragSession;
+  session.dx = event.clientX - session.startX; session.dy = event.clientY - session.startY;
+  session.pointerX = event.clientX; session.pointerY = event.clientY;
+  session.preview.style.transform = `translate3d(${session.dx}px,${session.dy}px,0) scale(1.025)`;
+  autoScrollWidget(session);
+  const hit = document.elementFromPoint(event.clientX, event.clientY)?.closest('.home-widget-card');
+  if (!hit || hit === session.card || hit.parentElement !== session.grid) return;
+  const rect = hit.getBoundingClientRect();
+  const sameRow = event.clientY >= rect.top && event.clientY <= rect.bottom;
+  const before = sameRow ? event.clientX < rect.left + rect.width / 2 : event.clientY < rect.top + rect.height / 2;
+  if ((before && session.placeholder.nextElementSibling !== hit) || (!before && hit.nextElementSibling !== session.placeholder)) {
+    const beforeRects = new Map([...session.grid.querySelectorAll('.home-widget-card')].map(card => [card, card.getBoundingClientRect()]));
+    if (before) session.grid.insertBefore(session.placeholder, hit);
+    else session.grid.insertBefore(session.placeholder, hit.nextElementSibling);
+    requestAnimationFrame(() => beforeRects.forEach((oldRect, card) => {
+      if (!card.isConnected) return;
+      const nextRect = card.getBoundingClientRect();
+      const dx = oldRect.left - nextRect.left; const dy = oldRect.top - nextRect.top;
+      if (Math.abs(dx) + Math.abs(dy) < 1) return;
+      card.style.transition = 'none'; card.style.transform = `translate3d(${dx}px,${dy}px,0)`;
+      requestAnimationFrame(() => { card.style.transition = ''; card.style.transform = ''; });
+    }));
+  }
+}
+
+function autoScrollWidget(session) {
+  if (session.autoScrollFrame || !widgetDragSession || session !== widgetDragSession) return;
+  session.autoScrollFrame = requestAnimationFrame(() => {
+    session.autoScrollFrame = 0;
+    if (!widgetDragSession || session !== widgetDragSession) return;
+    const edge = 64;
+    const direction = session.pointerY < edge ? -1 : session.pointerY > window.innerHeight - edge ? 1 : 0;
+    if (!direction) return;
+    const speed = Math.min(20, Math.max(7, Math.round((direction < 0 ? edge - session.pointerY : session.pointerY - (window.innerHeight - edge)) / 3)));
+    window.scrollBy(0, direction * speed);
+    handleWidgetPointerMove({ pointerId: widgetPointerStart?.pointerId, clientX: session.pointerX, clientY: session.pointerY, preventDefault() {} });
+  });
+}
+
+function finishWidgetPointer(event, canceled = false) {
+  clearTimeout(widgetPressTimer); widgetPressTimer = 0;
+  if (widgetResizeStart && event.pointerId === widgetResizeStart.pointerId) {
+    const current = homeLayout.items.find(item => item.id === widgetResizeStart.id);
+    const changed = current && current.size !== widgetResizeStart.originalSize;
+    widgetResizeStart.card.classList.remove('is-resizing');
+    widgetResizeStart = null;
+    if (changed) { suppressWidgetResizeClickUntil = Date.now() + 400; saveHomeLayout(); showLayoutUndo('尺寸已儲存'); }
+  }
+  if (!widgetPointerStart || event.pointerId !== widgetPointerStart.pointerId) return;
+  widgetPointerStart = null;
+  if (!widgetDragSession) return;
+  const session = widgetDragSession;
+  widgetDragSession = null;
+  if (session.autoScrollFrame) cancelAnimationFrame(session.autoScrollFrame);
+  session.preview.remove();
+  document.body.classList.remove('widget-drag-active');
+  session.grid.classList.remove('is-reordering');
+  if (canceled || Math.hypot(session.dx, session.dy) < 4) {
+    session.placeholder.replaceWith(session.card);
+    return;
+  }
+  session.placeholder.replaceWith(session.card);
+  const visibleOrder = [...session.grid.querySelectorAll('.home-widget-card[data-widget]')].map(node => node.dataset.widget);
+  const visible = new Set(visibleOrder);
+  const itemById = new Map(homeLayout.items.map(item => [item.id, item]));
+  const reordered = visibleOrder.map(id => itemById.get(id)).filter(Boolean);
+  const hiddenItems = homeLayout.items.filter(item => !visible.has(item.id));
+  homeLayout.items = [...reordered, ...hiddenItems];
+  saveHomeLayout();
+  suppressWidgetResizeClickUntil = Date.now() + 400;
+  showLayoutUndo('版面已儲存');
+}
+
+window.addEventListener('pointermove', event => {
+  if (widgetResizeStart && event.pointerId === widgetResizeStart.pointerId) {
+    event.preventDefault();
+    const item = homeLayout.items.find(entry => entry.id === widgetResizeStart.id);
+    const gridWidth = widgetResizeStart.card.closest('.home-widgets')?.getBoundingClientRect().width || widgetResizeStart.startWidth;
+    const ratio = Math.max(.18, Math.min(1, (widgetResizeStart.startWidth + event.clientX - widgetResizeStart.startX) / gridWidth));
+    const candidates = activeLayoutDevice() === 'tablet' ? [['small', .25], ['medium', .5], ['large', .75], ['full', 1]] : [['small', .25], ['medium', 1/3], ['large', .5], ['full', 1]];
+    const size = candidates.reduce((best, value) => Math.abs(value[1] - ratio) < Math.abs(best[1] - ratio) ? value : best)[0];
+    if (item) { item.size = size; widgetResizeStart.card.dataset.size = size; widgetResizeStart.card.classList.remove('size-small','size-medium','size-large','size-full'); widgetResizeStart.card.classList.add(`size-${size}`); }
+    return;
+  }
+  handleWidgetPointerMove(event);
+}, { passive: false });
+window.addEventListener('pointerup', event => finishWidgetPointer(event));
+window.addEventListener('pointercancel', event => finishWidgetPointer(event, true));
 
 document.addEventListener('wheel', event => {
   const wheel = event.target.closest?.('.focus-wheel');
@@ -745,6 +920,13 @@ function handleDrop(event) {
 
 function handleKeydown(event) {
   if (event.key === 'Escape') { if (drawerOpen) { drawerOpen = false; render(); return; } document.querySelector('dialog[open]')?.close(); return; }
+  if (event.target instanceof Element && event.target.matches('[data-widget-resize]') && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) {
+    event.preventDefault();
+    const item = homeLayout.items.find(entry => entry.id === event.target.closest('.home-widget-card')?.dataset.widget);
+    const sizes = ['small','medium','large','full'];
+    if (item) { rememberLayoutUndo(); item.size = sizes[Math.max(0, Math.min(3, sizes.indexOf(item.size) + (['ArrowRight','ArrowDown'].includes(event.key) ? 1 : -1)))]; saveHomeLayout(); render(); showLayoutUndo('小工具尺寸已更新'); }
+    return;
+  }
   const typing = event.target instanceof Element && event.target.matches('input,textarea,select,[contenteditable=true]');
   if (route === 'today' && !typing && !drawerOpen && !document.querySelector('dialog[open]') && !event.ctrlKey && !event.metaKey && !event.altKey && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
     event.preventDefault(); shiftHomeDate(event.key === 'ArrowLeft' ? 1 : -1); return;
@@ -791,6 +973,15 @@ document.addEventListener('dragover', handleDragOver);
 document.addEventListener('drop', handleDrop);
 document.addEventListener('keydown', handleKeydown);
 window.addEventListener('hashchange', () => { route = location.hash.replace(/^#\/?/, '').split('?')[0] || 'today'; updateUI({ route }); render(); });
+let layoutResizeTimer = 0;
+window.addEventListener('resize', () => {
+  if (layoutPreviewDevice) return;
+  clearTimeout(layoutResizeTimer);
+  layoutResizeTimer = window.setTimeout(() => {
+    const device = activeLayoutDevice();
+    if (homeLayout !== homeLayouts[device]) { homeLayout = homeLayouts[device]; homeEditMode = false; render(); }
+  }, 120);
+}, { passive: true });
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (getData().settings.theme === 'system') render(); });
 window.setInterval(timerTick, 250);
 window.setInterval(() => {
