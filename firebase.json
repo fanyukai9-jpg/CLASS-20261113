@@ -1,29 +1,12 @@
 {
-  "functions": [
-    {
-      "source": "functions",
-      "codebase": "default"
-    }
-  ],
   "hosting": {
     "public": ".",
     "ignore": [
       "firebase.json",
       "**/.*",
       "**/node_modules/**",
-      "functions/**",
-      "LINE_LOGIN_SETUP.md",
       "package.json",
       "package-lock.json"
-    ],
-    "rewrites": [
-      {
-        "source": "/api/line/**",
-        "function": {
-          "functionId": "lineAuth",
-          "region": "asia-east1"
-        }
-      }
     ]
   }
 }
