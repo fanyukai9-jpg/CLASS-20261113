@@ -7,17 +7,17 @@ export const statusLabels = { todo: '待辦', 'in-progress': '進行中', comple
 export function renderTask(task, data, options = {}) {
   const project = data.projects.find(item => item.id === task.projectId);
   const tags = (task.tags || []).slice(0, 3).map(tag => `<span class="tag">${escapeHTML(tag)}</span>`).join('');
-  const date = task.dueDate ? `<span class="task-meta-item">${escapeHTML(formatDate(task.dueDate))}</span>` : '';
+  const date = !options.home && task.dueDate ? `<span class="task-meta-item">${escapeHTML(formatDate(task.dueDate))}</span>` : '';
   const time = task.startTime ? `<span class="task-meta-item">${escapeHTML(formatTime(task.startTime, data.settings.hour24))}</span>` : '';
   const subtaskCount = (task.subtasks || []).length;
   const doneCount = (task.subtasks || []).filter(item => item.done).length;
-  return `<article class="task-row ${options.compact ? 'is-compact' : ''} ${task.status === 'completed' ? 'is-complete' : ''} ${task.dueDate && task.dueDate < new Date().toISOString().slice(0, 10) && task.status !== 'completed' ? 'is-overdue' : ''}" draggable="true" data-task-id="${escapeHTML(task.id)}">
-    <input class="task-select" type="checkbox" aria-label="選取${escapeHTML(task.title)}" data-select-task="${escapeHTML(task.id)}">
+  return `<article class="task-row ${options.home ? 'is-home-task' : ''} ${options.compact ? 'is-compact' : ''} ${task.status === 'completed' ? 'is-complete' : ''} ${task.dueDate && task.dueDate < new Date().toISOString().slice(0, 10) && task.status !== 'completed' ? 'is-overdue' : ''}" ${options.home ? '' : 'draggable="true"'} data-task-id="${escapeHTML(task.id)}">
+    ${options.home ? '' : `<input class="task-select" type="checkbox" aria-label="選取${escapeHTML(task.title)}" data-select-task="${escapeHTML(task.id)}">`}
     <button class="task-check" type="button" aria-label="${task.status === 'completed' ? '標記未完成' : '完成任務'}" data-action="toggle-task" data-id="${escapeHTML(task.id)}" aria-pressed="${task.status === 'completed'}"><span></span></button>
-    <div class="task-body"><div class="task-title-line"><button class="task-title" type="button" data-action="task-detail" data-id="${escapeHTML(task.id)}">${escapeHTML(task.title)}</button><span class="priority-dot ${task.priority}" title="${priorityLabels[task.priority] || '一般'}"></span>${task.status === 'in-progress' ? '<span class="status-pill">進行中</span>' : ''}</div>
-      <div class="task-meta">${date}${time}${project ? `<span class="project-chip"><i style="--project-color:${escapeHTML(project.color || '#6674b8')}"></i>${escapeHTML(project.name)}</span>` : ''}${subtaskCount ? `<span class="task-meta-item">子任務 ${doneCount}/${subtaskCount}</span>` : ''}${tags}</div>
+    <div class="task-body"><div class="task-title-line"><button class="task-title" type="button" data-action="task-detail" data-id="${escapeHTML(task.id)}">${escapeHTML(task.title)}</button>${options.home ? '' : `<span class="priority-dot ${task.priority}" title="${priorityLabels[task.priority] || '一般'}"></span>`}${task.status === 'in-progress' ? '<span class="status-pill">進行中</span>' : ''}</div>
+      <div class="task-meta">${date}${time}${!options.home && project ? `<span class="project-chip"><i style="--project-color:${escapeHTML(project.color || '#6674b8')}"></i>${escapeHTML(project.name)}</span>` : ''}${!options.home && subtaskCount ? `<span class="task-meta-item">子任務 ${doneCount}/${subtaskCount}</span>` : ''}${options.home ? (task.description ? `<span class="task-hint">${escapeHTML(task.description)}</span>` : '') : tags}</div>
     </div>
-    <div class="task-actions"><button class="icon-button" type="button" aria-label="編輯任務" data-action="task-edit" data-id="${escapeHTML(task.id)}">${icon('edit')}</button><button class="icon-button" type="button" aria-label="更多操作" data-action="task-menu" data-id="${escapeHTML(task.id)}">${icon('more')}</button></div>
+    <div class="task-actions">${options.home ? '' : `<button class="icon-button" type="button" aria-label="編輯任務" data-action="task-edit" data-id="${escapeHTML(task.id)}">${icon('edit')}</button>`}<button class="icon-button" type="button" aria-label="更多操作" data-action="task-menu" data-id="${escapeHTML(task.id)}">${icon('more')}</button></div>
   </article>`;
 }
 

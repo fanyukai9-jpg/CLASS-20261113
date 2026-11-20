@@ -18,6 +18,27 @@ let statsRange = 7;
 let query = '';
 let draggedTaskId = '';
 let filterRenderTimer;
+let homeDate = dateKey();
+let observedToday = homeDate;
+let homeCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
+let drawerOpen = false;
+let homeEditMode = false;
+let homeTransitionDirection = 0;
+const HOME_WIDGETS = ['inbox', 'focus', 'upcoming', 'lists'];
+let homeLayout = loadHomeLayout();
+
+function loadHomeLayout() {
+  const fallback = { order: [...HOME_WIDGETS], hidden: [], sizes: {}, locked: false };
+  try {
+    const stored = JSON.parse(localStorage.getItem('dayflow.home-layout.v1') || '{}');
+    const order = [...new Set([...(Array.isArray(stored.order) ? stored.order : []), ...HOME_WIDGETS])].filter(id => HOME_WIDGETS.includes(id));
+    return { order, hidden: (Array.isArray(stored.hidden) ? stored.hidden : []).filter(id => HOME_WIDGETS.includes(id)), sizes: stored.sizes && typeof stored.sizes === 'object' ? stored.sizes : {}, locked: Boolean(stored.locked) };
+  } catch { return fallback; }
+}
+
+function saveHomeLayout() {
+  try { localStorage.setItem('dayflow.home-layout.v1', JSON.stringify(homeLayout)); } catch { /* The home arrangement is optional. */ }
+}
 
 function loadFocus() {
   const defaults = { mode: 'focus', durations: { focus: 25, short: 5, long: 15 }, remainingMs: 25 * 60000, running: false, started: false, endAt: 0, taskId: '', completedCount: 0 };
@@ -31,41 +52,26 @@ function saveFocus() {
 
 function context() {
   if (focus.running) focus.remainingMs = Math.max(0, focus.endAt - Date.now());
-  return { greeting: getGreeting(), filters, taskView, projectView, calendarDate, calendarMode, statsRange, query, focus };
+  return { greeting: getGreeting(), filters, taskView, projectView, calendarDate, calendarMode, statsRange, query, focus, homeDate, homeCalendarMonth, homeLayout, homeEditMode, homeTransitionDirection };
 }
 
 function render() {
   const data = getData();
   applyPreferences(data.settings);
   const selected = selectedTasks.size;
-  app.innerHTML = `<div class="app-shell ${getUIState().collapsed ? 'sidebar-collapsed' : ''}">
-    <aside class="sidebar"><a class="brand" href="#today" data-navigate="today"><span class="brand-mark">D</span><span class="brand-copy">DAYFLOW<small>PERSONAL SPACE</small></span></a><button class="sidebar-toggle icon-button" data-action="toggle-sidebar" aria-label="收合側邊欄">${icon('menu')}</button>
-      <div class="nav-caption">工作空間</div><nav class="main-nav">${navItem('today', 'today', '今天')}${navItem('upcoming', 'calendar', '即將到來', dueSoonCount(data))}${navItem('calendar', 'calendar', '行事曆')}${navItem('inbox', 'inbox', '收集箱', inboxCount(data))}</nav>
-      <div class="sidebar-section-heading"><span>專案</span><button class="icon-button mini-icon" data-action="project-add" aria-label="新增專案">${icon('plus')}</button></div><nav class="project-nav">${data.projects.slice(0, 7).map(project => `<a href="#project/${encodeURIComponent(project.id)}" data-navigate="project/${escapeHTML(project.id)}" class="nav-item ${route === `project/${project.id}` ? 'is-active' : ''}"><i class="project-nav-dot" style="--project-color:${escapeHTML(project.color || '#6674b8')}"></i><span>${escapeHTML(project.name)}</span></a>`).join('') || '<p class="nav-empty">尚無專案</p>'}</nav>
-      <div class="nav-caption nav-caption-bottom">個人</div><nav class="main-nav">${navItem('habits', 'habits', '習慣')}${navItem('focus', 'focus', '專注')}${navItem('statistics', 'stats', '統計')}${navItem('settings', 'settings', '設定')}</nav>
-      <div class="sidebar-footer"><span class="local-indicator"></span><span>資料儲存在此裝置</span></div>
-    </aside>
-    <div class="app-main"><header class="topbar"><button class="mobile-menu icon-button" data-action="more-nav" aria-label="開啟導覽">${icon('menu')}</button><div class="topbar-location"><span>${escapeHTML(routeLabel(route))}</span><span class="topbar-date">${escapeHTML(new Intl.DateTimeFormat('zh-TW', { month: 'long', day: 'numeric', weekday: 'short' }).format(new Date()))}</span></div><div class="topbar-actions"><button class="global-search" data-action="open-search">${icon('search')}<span>搜尋任務、專案…</span><kbd>Ctrl K</kbd></button><button class="button button-primary quick-add-button" data-action="quick-add">${icon('plus')}<span>新增任務</span><kbd>Q</kbd></button><span class="device-badge" title="資料只存在此瀏覽器">${icon('settings')}</span></div></header>
+  app.innerHTML = `<div class="app-shell">
+    <div class="app-main"><header class="topbar"><a class="brand" href="#today" data-navigate="today" aria-label="DAYFLOW 首頁"><span class="brand-mark">D</span><span class="brand-name">DAYFLOW</span></a><div class="topbar-actions"><button class="icon-button topbar-icon" data-action="open-search" aria-label="搜尋任務" title="搜尋任務">${icon('search')}</button><button class="button button-primary quick-add-button" data-action="quick-add" aria-label="新增待辦" title="新增待辦" ${route === 'today' ? `data-date="${escapeHTML(homeDate)}"` : ''}>${icon('plus')}<span>新增</span></button><button class="icon-button topbar-icon" data-action="toggle-drawer" aria-label="開啟選單" aria-expanded="${drawerOpen}" title="選單">${icon('menu')}</button></div></header>
       <main class="main-content">${renderPage(route, data, context())}</main>
     </div>
-    ${renderMobileNav()}
+    ${drawerOpen ? renderDrawer(data) : ''}
     ${selected ? `<div class="bulk-bar"><span>已選取 ${selected} 項</span><button class="button button-small" data-action="bulk-complete">全部完成</button><select data-bulk-priority aria-label="變更優先級"><option value="">變更優先級</option><option value="p1">P1 緊急</option><option value="p2">P2 高</option><option value="p3">P3 一般</option><option value="p4">P4 低</option></select><button class="button button-small button-danger" data-action="bulk-delete">刪除</button><button class="icon-button" data-action="clear-selection" aria-label="取消選取">${icon('close')}</button></div>` : ''}
   </div>`;
   applySelections();
 }
 
-function navItem(id, symbol, label, badge = 0) {
-  return `<a class="nav-item ${route === id ? 'is-active' : ''}" href="#${id}" data-navigate="${id}">${icon(symbol)}<span>${label}</span>${badge ? `<i class="nav-badge">${badge}</i>` : ''}</a>`;
-}
-
-function renderMobileNav() {
-  const items = [['today', 'today', '今天'], ['inbox', 'inbox', '收集箱'], ['calendar', 'calendar', '日曆'], ['projects', 'projects', '專案']];
-  return `<nav class="mobile-nav">${items.map(([id, symbol, label]) => `<a class="mobile-nav-item ${route === id ? 'is-active' : ''}" href="#${id}" data-navigate="${id}">${icon(symbol)}<span>${label}</span></a>`).join('')}<button class="mobile-nav-item" data-action="more-nav">${icon('more')}<span>更多</span></button></nav>`;
-}
-
-function routeLabel(value) {
-  if (value.startsWith('project/')) return getData().projects.find(item => item.id === value.slice(8))?.name || '專案';
-  return ({ today: '今天', upcoming: '即將到來', calendar: '行事曆', inbox: '收集箱', projects: '專案', habits: '習慣', focus: '專注', statistics: '統計', settings: '設定', search: '搜尋' })[value] || '今天';
+function renderDrawer(data) {
+  const routes = [['today', '今天'], ['inbox', '收集箱', inboxCount(data)], ['upcoming', '即將到來', dueSoonCount(data)], ['calendar', '行事曆'], ['projects', '我的清單'], ['habits', '習慣'], ['focus', '專注'], ['statistics', '統計'], ['settings', '設定']];
+  return `<div class="drawer-scrim" data-action="close-drawer" aria-hidden="true"></div><aside class="app-drawer" aria-label="主選單"><div class="drawer-heading"><div><p class="eyebrow">DAYFLOW</p><h2>導覽</h2></div><button class="icon-button" data-action="close-drawer" aria-label="關閉選單">${icon('close')}</button></div><nav class="drawer-nav">${routes.map(([id, label, badge]) => `<a href="#${id}" data-navigate="${id}" class="drawer-nav-link ${route === id ? 'is-active' : ''}">${icon(({ today: 'today', inbox: 'inbox', upcoming: 'calendar', calendar: 'calendar', projects: 'projects', habits: 'habits', focus: 'focus', statistics: 'stats', settings: 'settings' })[id])}<span>${label}</span>${badge ? `<i>${badge}</i>` : ''}</a>`).join('')}</nav><div class="drawer-projects"><div class="drawer-section-heading"><span>專案</span><button class="icon-button" data-action="project-add" aria-label="新增專案">${icon('plus')}</button></div>${data.projects.map(project => `<a class="drawer-project-link" href="#project/${encodeURIComponent(project.id)}" data-navigate="project/${escapeHTML(project.id)}"><i style="--project-color:${escapeHTML(project.color || '#6674b8')}"></i>${escapeHTML(project.name)}</a>`).join('') || '<p class="empty-inline">尚無專案</p>'}</div><div class="drawer-footer"><span class="local-indicator"></span>資料儲存在此裝置</div></aside>`;
 }
 
 function dueSoonCount(data) { return data.tasks.filter(task => task.status !== 'completed' && task.dueDate >= dateKey() && task.dueDate <= dateKey(addDays(new Date(), 7))).length; }
@@ -84,6 +90,7 @@ function applySelections() {
 
 function setRoute(value) {
   route = value;
+  drawerOpen = false;
   updateUI({ route: value });
   if (location.hash !== `#${value}`) location.hash = value;
   render();
@@ -104,7 +111,7 @@ function openQuickAdd(options = {}) {
     const suggestion = parseQuickDate(event.target.value);
     const recurrence = suggestion.recurrence === 'daily' ? ' · 每天重複' : suggestion.recurrence === 'weekly' ? ' · 每週重複' : '';
     dialog.querySelector('[data-parse-note]').textContent = suggestion.date ? `辨識為 ${formatDate(suggestion.date)}${suggestion.time ? ` ${formatTime(suggestion.time, data.settings.hour24)}` : ''}${recurrence}` : '未辨識日期，會保留原始任務名稱。';
-    if (suggestion.date && !form.elements.dueDate.value) form.elements.dueDate.value = suggestion.date;
+    if (suggestion.date) form.elements.dueDate.value = suggestion.date;
     if (suggestion.time && !form.elements.startTime.value) form.elements.startTime.value = suggestion.time;
   });
 }
@@ -148,11 +155,6 @@ function openTaskMenu(taskId) {
   openDialog('任務操作', `<div class="action-menu-list"><button class="button" data-action="task-edit" data-id="${escapeHTML(taskId)}">編輯任務</button><button class="button" data-action="duplicate-task" data-id="${escapeHTML(taskId)}">複製任務</button><button class="button button-danger" data-action="task-delete" data-id="${escapeHTML(taskId)}">刪除任務</button></div>`);
 }
 
-function openMoreNav() {
-  const routes = [['upcoming', '即將到來'], ['habits', '習慣'], ['focus', '專注'], ['statistics', '統計'], ['settings', '設定']];
-  openDialog('更多功能', `<div class="action-menu-list">${routes.map(([id, label]) => `<button class="button" data-navigate="${id}">${label}</button>`).join('')}</div>`);
-}
-
 function parseFormTask(form) {
   const formData = new FormData(form);
   const id = String(formData.get('id') || '');
@@ -190,7 +192,7 @@ function submitQuickAdd(form) {
   const parsed = parseQuickDate(raw);
   const task = createTask({
     title: parsed.title,
-    dueDate: form.elements.dueDate.value || parsed.date,
+    dueDate: parsed.date || form.elements.dueDate.value,
     startTime: form.elements.startTime.value || parsed.time,
     priority: form.elements.priority.value,
     projectId: form.elements.projectId.value,
@@ -369,8 +371,11 @@ function timerFinish() {
 function timerTick() {
   if (!focus.running) return;
   focus.remainingMs = Math.max(0, focus.endAt - Date.now());
+  const display = `${String(Math.floor(focus.remainingMs / 60000)).padStart(2, '0')}:${String(Math.floor(focus.remainingMs % 60000 / 1000)).padStart(2, '0')}`;
   const clock = document.getElementById('focus-clock');
-  if (clock) clock.textContent = `${String(Math.floor(focus.remainingMs / 60000)).padStart(2, '0')}:${String(Math.floor(focus.remainingMs % 60000 / 1000)).padStart(2, '0')}`;
+  if (clock) clock.textContent = display;
+  const homeClock = document.getElementById('home-focus-clock');
+  if (homeClock) homeClock.textContent = display;
   if (focus.remainingMs <= 0) timerFinish();
 }
 
@@ -378,7 +383,7 @@ async function handleAction(action, element) {
   const id = element.dataset.id;
   switch (action) {
     case 'navigate-projects': setRoute('projects'); break;
-    case 'quick-add': openQuickAdd({ inbox: element.dataset.inbox === 'true', projectId: element.dataset.project || '', dueDate: element.dataset.date || '' }); break;
+    case 'quick-add': openQuickAdd({ inbox: element.dataset.inbox === 'true', projectId: element.dataset.project || '', dueDate: element.dataset.date || (route === 'today' ? homeDate : '') }); break;
     case 'open-task-form': openTaskEditor('', { inbox: element.dataset.inbox === 'true' }); break;
     case 'task-edit': dialogRoot.querySelector('dialog')?.close(); openTaskEditor(id); break;
     case 'task-detail': openTaskDetail(id); break;
@@ -387,8 +392,9 @@ async function handleAction(action, element) {
     case 'task-delete': await deleteTask(id); break;
     case 'duplicate-task': duplicateTask(id); break;
     case 'close-dialog': dialogRoot.querySelector('dialog')?.close(); break;
-    case 'toggle-sidebar': updateUI({ collapsed: !getUIState().collapsed }); render(); break;
-    case 'more-nav': openMoreNav(); break;
+    case 'more-nav':
+    case 'toggle-drawer': drawerOpen = !drawerOpen; render(); break;
+    case 'close-drawer': drawerOpen = false; render(); break;
     case 'open-search': query = ''; setRoute('search'); setTimeout(() => document.getElementById('search-page-input')?.focus(), 0); break;
     case 'task-view': taskView = element.dataset.view; render(); break;
     case 'project-add': openProjectForm(); break;
@@ -405,6 +411,14 @@ async function handleAction(action, element) {
     case 'calendar-jump': calendarDate = element.dataset.date; calendarMode = 'day'; setRoute('calendar'); break;
     case 'calendar-shift': { const current = parseDate(calendarDate); const step = Number(element.dataset.step); if (calendarMode === 'month') current.setMonth(current.getMonth() + step); else current.setDate(current.getDate() + step * (calendarMode === 'week' ? 7 : 1)); calendarDate = dateKey(current); render(); break; }
     case 'calendar-add': openQuickAdd({ dueDate: element.dataset.date }); break;
+    case 'home-date-today': homeDate = dateKey(); homeCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12); render(); break;
+    case 'home-month-shift': { const next = new Date(homeCalendarMonth); next.setDate(1); next.setMonth(next.getMonth() + Number(element.dataset.step)); homeCalendarMonth = next; render(); break; }
+    case 'home-widget-edit': if (homeLayout.locked) { toast('首頁配置已鎖定，請先解除鎖定'); break; } homeEditMode = !homeEditMode; render(); break;
+    case 'home-widget-lock': homeLayout.locked = !homeLayout.locked; if (homeLayout.locked) homeEditMode = false; saveHomeLayout(); render(); break;
+    case 'home-widget-move': { const index = homeLayout.order.indexOf(id); const nextIndex = index + Number(element.dataset.step); if (index >= 0 && nextIndex >= 0 && nextIndex < homeLayout.order.length) { [homeLayout.order[index], homeLayout.order[nextIndex]] = [homeLayout.order[nextIndex], homeLayout.order[index]]; saveHomeLayout(); render(); } break; }
+    case 'home-widget-size': homeLayout.sizes[id] = homeLayout.sizes[id] === 'wide' ? 'normal' : 'wide'; saveHomeLayout(); render(); break;
+    case 'home-widget-remove': homeLayout.hidden = [...new Set([...homeLayout.hidden, id])]; saveHomeLayout(); render(); break;
+    case 'home-widget-add': homeLayout.hidden = homeLayout.hidden.filter(item => item !== id); saveHomeLayout(); render(); break;
     case 'stats-range': statsRange = Number(element.dataset.range); render(); break;
     case 'focus-mode': timerChangeMode(element.dataset.mode); break;
     case 'focus-start': timerStart(); break;
@@ -540,12 +554,41 @@ function handleDrop(event) {
 }
 
 function handleKeydown(event) {
-  if (event.key === 'Escape') { document.querySelector('dialog[open]')?.close(); return; }
-  const typing = event.target.matches('input,textarea,select,[contenteditable=true]');
+  if (event.key === 'Escape') { if (drawerOpen) { drawerOpen = false; render(); return; } document.querySelector('dialog[open]')?.close(); return; }
+  const typing = event.target instanceof Element && event.target.matches('input,textarea,select,[contenteditable=true]');
+  if (route === 'today' && !typing && !drawerOpen && !document.querySelector('dialog[open]') && !event.ctrlKey && !event.metaKey && !event.altKey && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+    event.preventDefault(); shiftHomeDate(event.key === 'ArrowLeft' ? 1 : -1); return;
+  }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); query = ''; setRoute('search'); setTimeout(() => document.getElementById('search-page-input')?.focus(), 0); return; }
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { const form = event.target.closest('form'); if (form) { event.preventDefault(); form.requestSubmit(); } return; }
-  if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'q') { event.preventDefault(); openQuickAdd(); }
+  if (!typing && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'q') { event.preventDefault(); openQuickAdd({ dueDate: route === 'today' ? homeDate : '' }); }
 }
+
+function shiftHomeDate(amount) {
+  homeDate = dateKey(addDays(homeDate, amount));
+  const selected = parseDate(homeDate);
+  homeCalendarMonth = new Date(selected.getFullYear(), selected.getMonth(), 1, 12);
+  homeTransitionDirection = amount > 0 ? 1 : -1;
+  render();
+  window.setTimeout(() => { homeTransitionDirection = 0; }, 260);
+}
+
+let swipeStart = null;
+app.addEventListener('touchstart', event => {
+  if (route !== 'today' || drawerOpen || document.querySelector('dialog[open]') || event.touches.length !== 1) { swipeStart = null; return; }
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target || target.closest('.today-task-list, .home-calendar, .home-widget-tools, .home-widget-card, button, a, input, textarea, select, [data-no-day-swipe]')) { swipeStart = null; return; }
+  swipeStart = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+}, { passive: true });
+app.addEventListener('touchend', event => {
+  if (!swipeStart || route !== 'today' || drawerOpen || document.querySelector('dialog[open]')) { swipeStart = null; return; }
+  const touch = event.changedTouches[0];
+  const dx = touch.clientX - swipeStart.x;
+  const dy = touch.clientY - swipeStart.y;
+  swipeStart = null;
+  if (Math.abs(dx) >= 60 && Math.abs(dx) > Math.abs(dy) * 1.25) shiftHomeDate(dx < 0 ? 1 : -1);
+}, { passive: true });
+app.addEventListener('touchcancel', () => { swipeStart = null; }, { passive: true });
 
 document.addEventListener('click', handleClick);
 document.addEventListener('submit', handleSubmit);
@@ -560,6 +603,17 @@ document.addEventListener('keydown', handleKeydown);
 window.addEventListener('hashchange', () => { route = location.hash.replace(/^#\/?/, '').split('?')[0] || 'today'; updateUI({ route }); render(); });
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (getData().settings.theme === 'system') render(); });
 window.setInterval(timerTick, 250);
+window.setInterval(() => {
+  const clock = document.getElementById('home-clock');
+  if (clock) clock.textContent = new Intl.DateTimeFormat('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(new Date());
+  const systemToday = dateKey();
+  if (systemToday !== observedToday) {
+    if (homeDate === observedToday) homeDate = systemToday;
+    observedToday = systemToday;
+    if (homeDate === systemToday) homeCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
+    if (route === 'today') render();
+  }
+}, 1000);
 window.addEventListener('dayflow:data', () => { if (!document.querySelector('dialog[open]')) render(); });
 
 render();
