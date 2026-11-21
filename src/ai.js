@@ -3,7 +3,7 @@ import { firebaseApp } from './auth.js';
 
 const ai = getAI(firebaseApp, { backend: new GoogleAIBackend() });
 const taskModel = getGenerativeModel(ai, {
-  model: 'gemini-4-hydrogen',
+  model: 'gemini-3.5-flash-lite',
   generationConfig: {
     responseMimeType: 'application/json',
     responseSchema: {
