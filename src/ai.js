@@ -6,17 +6,6 @@ const taskModel = getGenerativeModel(ai, {
   model: 'gemini-4-hydrogen',
   generationConfig: {
     responseMimeType: 'application/json',
-    responseSchema: {
-      type: 'object',
-      properties: {
-        title: { type: 'string' },
-        dueDate: { type: 'string', nullable: true },
-        startTime: { type: 'string', nullable: true },
-        priority: { type: 'string', enum: ['none', 'p4', 'p3', 'p2', 'p1'] },
-        recurrence: { type: 'string', enum: ['none', 'daily', 'weekly'] },
-      },
-      required: ['title', 'dueDate', 'startTime', 'priority', 'recurrence'],
-    },
     temperature: 0.1,
     maxOutputTokens: 256,
   },

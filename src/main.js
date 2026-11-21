@@ -219,7 +219,7 @@ function openQuickAdd(options = {}) {
     button.textContent = '整理中…';
     note.textContent = '正在將這段輸入傳給 Gemini 整理…';
     try {
-      const { parseTaskWithAI } = await import('./ai.js');
+      const { parseTaskWithAI } = await import('./ai.js?v=dayflow-ai-3');
       const suggestion = await parseTaskWithAI(originalText);
       input.value = suggestion.title;
       if (suggestion.dueDate) form.elements.dueDate.value = suggestion.dueDate;
