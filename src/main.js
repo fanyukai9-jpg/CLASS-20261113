@@ -205,12 +205,42 @@ function openQuickAdd(options = {}) {
   const projects = data.projects.map(project => `<option value="${escapeHTML(project.id)}" ${options.projectId === project.id ? 'selected' : ''}>${escapeHTML(project.name)}</option>`).join('');
   const lists = (data.lists || []).map(list => `<option value="${escapeHTML(list.id)}" ${options.listId === list.id || (!options.listId && list.id === 'list-inbox') ? 'selected' : ''}>${escapeHTML(list.name)}</option>`).join('');
   const recurrenceLabel = parsed.recurrence === 'daily' ? ' · 每天重複' : parsed.recurrence === 'weekly' ? ' · 每週重複' : '';
-  const dialog = openDialog('快速新增', `<div class="quick-add-tabs"><button class="is-active" data-action="quick-add-type" data-type="task">待辦</button><button data-action="quick-add-type" data-type="project">專案</button></div><p class="muted quick-add-hint">支援「明天下午 3 點健身」、「每週一整理課程」等簡單日期與時間。</p><form class="form-grid quick-add-form" data-form="quick-add"><label class="field full"><span>任務名稱</span><input name="title" maxlength="120" required autofocus value="${escapeHTML(options.title || '')}" placeholder="先記下要做的事"></label><div class="quick-parse-note full" data-parse-note>${parsed.date ? `辨識為 ${escapeHTML(formatDate(parsed.date))}${parsed.time ? ` ${escapeHTML(formatTime(parsed.time, data.settings.hour24))}` : ''}${recurrenceLabel}` : '也可以稍後再安排時間。'}</div><label class="field"><span>清單</span><select name="listId">${lists}</select></label><label class="field"><span>所屬專案</span><select name="projectId"><option value="">不指定</option>${projects}</select></label><label class="field"><span>優先級</span><select name="priority">${[['', '無優先級'], ['p4', '低'], ['p3', '中'], ['p2', '高'], ['p1', '緊急']].map(([value, label]) => `<option value="${value}" ${value === (options.priority || '') ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label class="field"><span>日期</span><input type="date" name="dueDate" value="${escapeHTML(options.dueDate || '')}"></label><label class="field"><span>時間</span><input type="time" name="startTime" value="${escapeHTML(options.startTime || '')}"></label><div class="form-actions full"><button class="button button-primary" type="submit">建立待辦</button><button class="button" type="button" data-action="close-dialog">取消</button></div></form>`);
+  const dialog = openDialog('快速新增', `<div class="quick-add-tabs"><button class="is-active" data-action="quick-add-type" data-type="task">待辦</button><button data-action="quick-add-type" data-type="project">專案</button></div><p class="muted quick-add-hint">輸入一句話，AI 可整理任務與日期時間；也支援「明天下午 3 點健身」等快速日期。</p><form class="form-grid quick-add-form" data-form="quick-add"><label class="field full"><span>任務名稱或描述</span><input name="title" maxlength="500" required autofocus value="${escapeHTML(options.title || '')}" placeholder="例如：明天下午三點前交週報"></label><div class="quick-ai-row full"><button class="button button-small" type="button" data-action="ai-parse-task">✦ AI 整理</button><span class="quick-ai-note" data-ai-note>按下後只會將這段輸入傳給 Gemini 解析，結果可再修改。</span></div><div class="quick-parse-note full" data-parse-note>${parsed.date ? `辨識為 ${escapeHTML(formatDate(parsed.date))}${parsed.time ? ` ${escapeHTML(formatTime(parsed.time, data.settings.hour24))}` : ''}${recurrenceLabel}` : '也可以稍後再安排時間。'}</div><label class="field"><span>清單</span><select name="listId">${lists}</select></label><label class="field"><span>所屬專案</span><select name="projectId"><option value="">不指定</option>${projects}</select></label><label class="field"><span>優先級</span><select name="priority">${[['', '無優先級'], ['p4', '低'], ['p3', '中'], ['p2', '高'], ['p1', '緊急']].map(([value, label]) => `<option value="${value}" ${value === (options.priority || '') ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label class="field"><span>日期</span><input type="date" name="dueDate" value="${escapeHTML(options.dueDate || '')}"></label><label class="field"><span>時間</span><input type="time" name="startTime" value="${escapeHTML(options.startTime || '')}"></label><div class="form-actions full"><button class="button button-primary" type="submit">建立待辦</button><button class="button" type="button" data-action="close-dialog">取消</button></div></form>`);
   const form = dialog.querySelector('form');
   if (options.inbox) { form.elements.projectId.value = ''; form.elements.listId.value = 'list-inbox'; form.elements.dueDate.value = ''; }
   if (options.dueDate) form.elements.dueDate.value = options.dueDate;
+  dialog.querySelector('[data-action="ai-parse-task"]').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const note = dialog.querySelector('[data-ai-note]');
+    const input = form.elements.title;
+    const originalText = input.value.trim();
+    if (!originalText) { note.textContent = '請先輸入待辦描述。'; input.focus(); return; }
+    button.disabled = true;
+    button.textContent = '整理中…';
+    note.textContent = '正在將這段輸入傳給 Gemini 整理…';
+    try {
+      const { parseTaskWithAI } = await import('./ai.js');
+      const suggestion = await parseTaskWithAI(originalText);
+      input.value = suggestion.title;
+      if (suggestion.dueDate) form.elements.dueDate.value = suggestion.dueDate;
+      if (suggestion.startTime) form.elements.startTime.value = suggestion.startTime;
+      if (suggestion.priority) form.elements.priority.value = suggestion.priority;
+      form.dataset.recurrence = suggestion.recurrence;
+      form.dataset.aiApplying = 'true';
+      form.elements.title.dispatchEvent(new Event('input', { bubbles: true }));
+      delete form.dataset.aiApplying;
+      note.textContent = '已整理好，請確認內容與日期後再建立待辦。';
+    } catch (error) {
+      console.error('AI task parsing failed:', error);
+      note.textContent = 'AI 暫時無法使用。請確認 Firebase AI Logic 已啟用，或直接手動新增。';
+    } finally {
+      button.disabled = false;
+      button.textContent = '✦ AI 整理';
+    }
+  });
   form.addEventListener('input', event => {
     if (event.target.name !== 'title') return;
+    if (!form.dataset.aiApplying) delete form.dataset.recurrence;
     const suggestion = parseQuickDate(event.target.value);
     const recurrence = suggestion.recurrence === 'daily' ? ' · 每天重複' : suggestion.recurrence === 'weekly' ? ' · 每週重複' : '';
     dialog.querySelector('[data-parse-note]').textContent = suggestion.date ? `辨識為 ${formatDate(suggestion.date)}${suggestion.time ? ` ${formatTime(suggestion.time, data.settings.hour24)}` : ''}${recurrence}` : '未辨識日期，會保留原始任務名稱。';
@@ -337,7 +367,7 @@ function submitQuickAdd(form) {
     priority: form.elements.priority.value,
     projectId: form.elements.projectId.value,
     listId: form.elements.listId.value,
-    recurrence: parsed.recurrence,
+    recurrence: form.dataset.recurrence || parsed.recurrence,
   });
   if (!task.title) return;
   updateData(data => data.tasks.push(task));

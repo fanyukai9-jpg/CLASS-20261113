@@ -405,6 +405,8 @@ kbd { padding: 2px 5px; border: 1px solid var(--border); border-radius: 4px; bac
 .weekday-picker span { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); font-size: 9px; }
 .weekday-picker input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .quick-add-hint { margin: 0 0 14px; font-size: 10px; }
+.quick-ai-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: -5px; }
+.quick-ai-note { color: var(--muted); font-size: 9px; }
 .quick-parse-note { margin-top: -4px; color: var(--accent); font-size: 9px; }
 .action-menu-list { display: grid; gap: 8px; }
 
