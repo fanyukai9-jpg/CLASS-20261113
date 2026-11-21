@@ -537,6 +537,38 @@ kbd { padding: 2px 5px; border: 1px solid var(--border); border-radius: 4px; bac
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 
+.auth-screen { display: grid; min-height: 100svh; place-items: center; padding: 28px 18px; background: radial-gradient(ellipse at 50% 4%, color-mix(in srgb, var(--accent) 10%, var(--page)), var(--page) 58%); }
+.auth-card { width: min(100%, 430px); padding: 44px 42px 34px; border: 1px solid var(--border); border-radius: 24px; background: var(--surface); box-shadow: 0 24px 80px rgb(30 36 48 / 8%); text-align: center; }
+.auth-mark { display: grid; width: 50px; height: 50px; margin: 0 auto 22px; place-items: center; border-radius: 16px; background: var(--accent); box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 24%, transparent); color: #fff; font-size: 27px; font-weight: 750; letter-spacing: -.09em; }
+.auth-card .eyebrow { margin: 0 0 8px; color: var(--accent); font-size: 10px; font-weight: 700; letter-spacing: .18em; }
+.auth-card h1 { margin: 0; font-size: clamp(25px, 5vw, 30px); letter-spacing: -.045em; }
+.auth-description { max-width: 310px; margin: 12px auto 26px; color: var(--muted); font-size: 13px; }
+.google-sign-in { display: flex; width: 100%; min-height: 49px; align-items: center; justify-content: center; gap: 12px; border: 1px solid var(--border-strong); border-radius: 11px; background: var(--surface); color: var(--ink); font-weight: 650; transition: background .16s ease, border-color .16s ease, transform .16s ease; }
+.google-sign-in:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--accent) 36%, var(--border-strong)); background: var(--surface-subtle); }
+.google-sign-in:disabled { cursor: wait; opacity: .7; }
+.google-sign-in svg { width: 19px; height: 19px; }
+.auth-footnote { margin: 24px 0 0; color: var(--faint); font-size: 11px; line-height: 1.6; }
+.auth-error { margin: 16px 0 0; color: var(--red); font-size: 12px; }
+.auth-retry { justify-content: center; }
+.auth-account { display: flex; max-width: 220px; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+.auth-account img, .auth-avatar-fallback { width: 28px; height: 28px; flex: 0 0 auto; border-radius: 50%; }
+.auth-account img { object-fit: cover; }
+.auth-avatar-fallback { display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 700; }
+.auth-account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auth-sign-out { min-height: 34px; padding: 0 11px; font-size: 11px; }
+
+@media (max-width: 700px) {
+  .auth-card { padding: 38px 26px 28px; border-radius: 20px; }
+  .auth-account { max-width: 38px; }
+  .auth-account-name { display: none; }
+  .auth-sign-out { min-height: 32px; padding: 0 8px; font-size: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .google-sign-in { transition: none; }
+  .google-sign-in:hover:not(:disabled) { transform: none; }
+}
+
 /* DAYFLOW home-first layout */
 .app-shell, .app-main { width: 100%; min-width: 0; margin-left: 0; }
 .topbar { min-height: 66px; padding-inline: max(22px, calc((100vw - 1120px) / 2)); background: var(--surface); backdrop-filter: none; }

@@ -7,6 +7,12 @@ import { confirmDialog, escapeHTML, openDialog, toast } from './ui.js';
 
 const app = document.getElementById('app');
 const dialogRoot = document.getElementById('dialog-root');
+let authClient = null;
+let authUser = null;
+let authReady = false;
+let authBusy = false;
+let authError = '';
+let authLoadError = false;
 const filters = { query: '', priority: '', project: '', date: '', sort: 'date' };
 const selectedTasks = new Set();
 const focus = loadFocus();
@@ -97,12 +103,20 @@ function context() {
   return { greeting: getGreeting(), filters, taskView, projectView, calendarDate, calendarMode, statsRange, query, focus, homeDate, homeCalendarMonth, homeLayout, homeEditMode, homeTransitionDirection, layoutDevice: activeLayoutDevice() };
 }
 
+function renderAuthGate() {
+  const title = !authReady ? '正在確認登入狀態' : authLoadError ? '登入服務暫時無法載入' : '登入 DAYFLOW';
+  const message = !authReady ? '正在安全地連線至 Firebase Authentication。' : authLoadError ? '請檢查網路連線後重新載入頁面。' : '使用 Google 帳戶登入，開始整理你的每一天。';
+  const googleMark = `<svg aria-hidden="true" viewBox="0 0 48 48"><path fill="#4285F4" d="M43.6 24.5c0-1.4-.1-2.8-.4-4.1H24v7.8h11a9.4 9.4 0 0 1-4.1 6.2v5.1h6.7c3.9-3.6 6-8.9 6-15Z"/><path fill="#34A853" d="M24 44c5.5 0 10.2-1.8 13.6-4.9l-6.7-5.1c-1.8 1.2-4.1 2-6.9 2-5.3 0-9.8-3.6-11.4-8.4H5.7v5.2A20 20 0 0 0 24 44Z"/><path fill="#FBBC05" d="M12.6 27.6a12 12 0 0 1 0-7.2v-5.2H5.7a20 20 0 0 0 0 17.6l6.9-5.2Z"/><path fill="#EA4335" d="M24 12c3 0 5.7 1 7.8 3.1l5.9-5.9A19.6 19.6 0 0 0 24 4 20 20 0 0 0 5.7 15.2l6.9 5.2C14.2 15.6 18.7 12 24 12Z"/></svg>`;
+  app.innerHTML = `<main class="auth-screen"><section class="auth-card" aria-labelledby="auth-title"><div class="auth-mark">D</div><p class="eyebrow">YOUR DAY, IN FLOW</p><h1 id="auth-title">${title}</h1><p class="auth-description">${message}</p>${authReady && !authLoadError ? `<button class="google-sign-in" data-action="google-sign-in" ${authBusy ? 'disabled' : ''}>${googleMark}<span>${authBusy ? '正在連線…' : '使用 Google 帳戶繼續'}</span></button>` : ''}${authLoadError ? '<button class="button button-primary auth-retry" data-action="auth-retry">重新載入</button>' : ''}${authError ? `<p class="auth-error" role="alert">${escapeHTML(authError)}</p>` : ''}<p class="auth-footnote">登入後即可使用 DAYFLOW。你的任務資料仍保存在目前的瀏覽器中。</p></section></main>`;
+}
+
 function render() {
+  if (!authReady || !authUser) { renderAuthGate(); return; }
   const data = getData();
   applyPreferences(data.settings);
   const selected = selectedTasks.size;
   app.innerHTML = `<div class="app-shell">
-    <div class="app-main"><header class="topbar"><a class="brand" href="#today" data-navigate="today" aria-label="DAYFLOW 首頁"><span class="brand-mark">D</span><span class="brand-name">DAYFLOW</span></a><div class="topbar-actions"><button class="icon-button topbar-icon" data-action="open-search" aria-label="搜尋任務" title="搜尋任務">${icon('search')}</button><button class="button button-primary quick-add-button" data-action="quick-add" aria-label="新增待辦" title="新增待辦" ${route === 'today' ? `data-date="${escapeHTML(homeDate)}"` : ''}>${icon('plus')}<span>新增</span></button><button class="icon-button topbar-icon" data-action="toggle-drawer" aria-label="開啟選單" aria-expanded="${drawerOpen}" title="選單">${icon('menu')}</button></div></header>
+    <div class="app-main"><header class="topbar"><a class="brand" href="#today" data-navigate="today" aria-label="DAYFLOW 首頁"><span class="brand-mark">D</span><span class="brand-name">DAYFLOW</span></a><div class="topbar-actions"><button class="icon-button topbar-icon" data-action="open-search" aria-label="搜尋任務" title="搜尋任務">${icon('search')}</button><button class="button button-primary quick-add-button" data-action="quick-add" aria-label="新增待辦" title="新增待辦" ${route === 'today' ? `data-date="${escapeHTML(homeDate)}"` : ''}>${icon('plus')}<span>新增</span></button><span class="auth-account" title="${escapeHTML(authUser.email || authUser.displayName || '')}">${authUser.photoURL ? `<img src="${escapeHTML(authUser.photoURL)}" alt="">` : `<span class="auth-avatar-fallback">${escapeHTML((authUser.displayName || authUser.email || 'G').slice(0,1).toUpperCase())}</span>`}<span class="auth-account-name">${escapeHTML(authUser.displayName || authUser.email || 'Google 帳戶')}</span></span><button class="button auth-sign-out" data-action="google-sign-out">登出</button><button class="icon-button topbar-icon" data-action="toggle-drawer" aria-label="開啟選單" aria-expanded="${drawerOpen}" title="選單">${icon('menu')}</button></div></header>
       <main class="main-content">${renderPage(route, data, context())}</main>
     </div>
     ${drawerOpen ? renderDrawer(data) : ''}
@@ -531,6 +545,19 @@ function setFocusWheel(unit, value) {
 async function handleAction(action, element) {
   const id = element.dataset.id;
   switch (action) {
+    case 'google-sign-in':
+      if (!authClient || authBusy) break;
+      authBusy = true; authError = ''; renderAuthGate();
+      try { await authClient.signInWithGoogle(); }
+      catch (error) { authError = authClient.authErrorMessage(error); }
+      finally { authBusy = false; render(); }
+      break;
+    case 'google-sign-out':
+      if (!authClient || !authUser) break;
+      try { await authClient.signOutUser(); }
+      catch (error) { toast(authClient.authErrorMessage(error), 'error'); }
+      break;
+    case 'auth-retry': location.reload(); break;
     case 'navigate-projects': setRoute('projects'); break;
     case 'quick-add': openQuickAdd({ inbox: element.dataset.inbox === 'true', projectId: element.dataset.project || '', dueDate: element.dataset.date || (route === 'today' ? homeDate : '') }); break;
     case 'quick-add-type': dialogRoot.querySelector('dialog')?.close(); openQuickAdd({ kind: element.dataset.type === 'project' ? 'project' : 'task' }); break;
@@ -997,4 +1024,23 @@ window.setInterval(() => {
 }, 1000);
 window.addEventListener('dayflow:data', () => { if (!document.querySelector('dialog[open]')) render(); });
 
-render();
+async function initializeAuthentication() {
+  renderAuthGate();
+  try {
+    authClient = await import('./auth.js');
+    authClient.observeAuthState(user => {
+      authUser = user;
+      authReady = true;
+      authLoadError = false;
+      authError = '';
+      render();
+    });
+  } catch (error) {
+    console.error('DAYFLOW Firebase Authentication 初始化失敗。', error);
+    authReady = true;
+    authLoadError = true;
+    renderAuthGate();
+  }
+}
+
+initializeAuthentication();
