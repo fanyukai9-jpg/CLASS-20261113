@@ -12,7 +12,7 @@ const taskModel = getGenerativeModel(ai, {
         title: { type: 'string' },
         dueDate: { type: 'string', nullable: true },
         startTime: { type: 'string', nullable: true },
-        priority: { type: 'string', enum: ['', 'p4', 'p3', 'p2', 'p1'] },
+        priority: { type: 'string', enum: ['none', 'p4', 'p3', 'p2', 'p1'] },
         recurrence: { type: 'string', enum: ['none', 'daily', 'weekly'] },
       },
       required: ['title', 'dueDate', 'startTime', 'priority', 'recurrence'],
@@ -24,7 +24,7 @@ const taskModel = getGenerativeModel(ai, {
 
 export async function parseTaskWithAI(text, now = new Date()) {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
-  const prompt = `將使用者輸入整理為 DAYFLOW 待辦。只回傳符合 JSON schema 的資料。\n今天日期（台北）：${today}。日期用 YYYY-MM-DD，時間用 24 小時 HH:mm。未指定日期/時間用空字串。標題需精簡並移除排程語句。優先級只在使用者明確表達重要或急迫時設定：p1 緊急、p2 高、p3 中、p4 低，否則空字串。只有清楚表示每天或每週重複才設定 recurrence，否則 none。不要臆測缺少的資訊。\n使用者輸入：${JSON.stringify(text.slice(0, 500))}`;
+  const prompt = `將使用者輸入整理為 DAYFLOW 待辦。只回傳符合 JSON schema 的資料。\n今天日期（台北）：${today}。日期用 YYYY-MM-DD，時間用 24 小時 HH:mm。未指定日期/時間用空字串。標題需精簡並移除排程語句。優先級只在使用者明確表達重要或急迫時設定：p1 緊急、p2 高、p3 中、p4 低，否則 none。只有清楚表示每天或每週重複才設定 recurrence，否則 none。不要臆測缺少的資訊。\n使用者輸入：${JSON.stringify(text.slice(0, 500))}`;
   const result = await taskModel.generateContent(prompt);
   const data = JSON.parse(result.response.text());
   const title = String(data.title || '').trim().slice(0, 120);
@@ -37,7 +37,7 @@ export async function parseTaskWithAI(text, now = new Date()) {
     title,
     dueDate,
     startTime,
-    priority: priorities.includes(data.priority) ? data.priority : '',
+    priority: priorities.includes(data.priority) ? (data.priority === 'none' ? '' : data.priority) : '',
     recurrence: recurrences.includes(data.recurrence) ? data.recurrence : 'none',
   };
 }
