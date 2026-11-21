@@ -2,6 +2,7 @@ import { addDays, dateKey, DAY } from './dates.js';
 
 const DATA_KEY = 'dayflow.data.v1';
 const UI_KEY = 'dayflow.ui.v1';
+const MIGRATION_OWNER_KEY = 'dayflow.data.migration-owner.v1';
 const VERSION = 1;
 const DEFAULT_LISTS = [
   { id: 'list-inbox', name: '待整理', color: '#9299a5', system: true },
@@ -79,6 +80,8 @@ function loadData() {
   return seed;
 }
 
+let activeUserId = '';
+const scopedKey = key => activeUserId ? `${key}.user.${activeUserId}` : key;
 let data = loadData();
 let uiState = (() => {
   try { return { collapsed: false, route: 'today', ...(JSON.parse(localStorage.getItem(UI_KEY) || '{}')) }; }
@@ -88,11 +91,48 @@ let uiState = (() => {
 export function getData() { return data; }
 export function getUIState() { return uiState; }
 
+export function activateUserScope(userId) {
+  const nextUserId = String(userId || '');
+  if (activeUserId === nextUserId) return data;
+  activeUserId = nextUserId;
+  if (!activeUserId) return data;
+
+  const userDataKey = scopedKey(DATA_KEY);
+  const userUiKey = scopedKey(UI_KEY);
+  const savedUserData = localStorage.getItem(userDataKey);
+  const migrationOwner = localStorage.getItem(MIGRATION_OWNER_KEY);
+  if (savedUserData) {
+    try { data = normalizeData(JSON.parse(savedUserData)); }
+    catch { data = makeSeedData(); }
+  } else if (!migrationOwner) {
+    // Keep the existing browser's local-first data for the first account that signs in.
+    data = loadData();
+    localStorage.setItem(userDataKey, JSON.stringify(data));
+    localStorage.setItem(MIGRATION_OWNER_KEY, activeUserId);
+  } else {
+    data = makeSeedData();
+    localStorage.setItem(userDataKey, JSON.stringify(data));
+  }
+
+  try {
+    const savedUiState = localStorage.getItem(userUiKey);
+    uiState = { collapsed: false, route: 'today', ...(savedUiState ? JSON.parse(savedUiState) : {}) };
+  } catch { uiState = { collapsed: false, route: 'today' }; }
+  return data;
+}
+
+export function replaceCloudData(value) {
+  data = normalizeData(value);
+  try { localStorage.setItem(scopedKey(DATA_KEY), JSON.stringify(data)); } catch { /* The cloud remains the source of truth. */ }
+  window.dispatchEvent(new CustomEvent('dayflow:data', { detail: { data, remote: true } }));
+  return data;
+}
+
 export function saveData(next) {
   data = normalizeData(next);
-  try { localStorage.setItem(DATA_KEY, JSON.stringify(data)); }
+  try { localStorage.setItem(scopedKey(DATA_KEY), JSON.stringify(data)); }
   catch (error) { console.error('DAYFLOW 無法儲存資料。', error); }
-  window.dispatchEvent(new CustomEvent('dayflow:data', { detail: data }));
+  window.dispatchEvent(new CustomEvent('dayflow:data', { detail: { data, remote: false } }));
   return data;
 }
 
@@ -104,7 +144,7 @@ export function updateData(updater) {
 
 export function updateUI(updater) {
   uiState = { ...uiState, ...updater };
-  try { localStorage.setItem(UI_KEY, JSON.stringify(uiState)); } catch { /* UI preferences are optional. */ }
+  try { localStorage.setItem(scopedKey(UI_KEY), JSON.stringify(uiState)); } catch { /* UI preferences are optional. */ }
   return uiState;
 }
 

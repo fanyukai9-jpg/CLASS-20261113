@@ -1,0 +1,82 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // DAYFLOW stores one private state document at users/{uid}/dayflow/main.
+    // It contains the user's tasks, projects, lists, goals, habits,
+    // focus sessions, and preferences. No profile or role fields are stored.
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function uidUnchanged() {
+      return request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return request.resource.data.uid == resource.data.uid &&
+        request.resource.data.uid == request.auth.uid;
+    }
+
+    function isValidSettings(settings) {
+      return settings is map &&
+        settings.keys().hasOnly([
+          'theme', 'accent', 'compact', 'weekStartsMonday', 'hour24', 'defaultPriority'
+        ]) &&
+        settings.keys().hasAll([
+          'theme', 'accent', 'compact', 'weekStartsMonday', 'hour24', 'defaultPriority'
+        ]) &&
+        settings.theme in ['light', 'dark', 'system'] &&
+        settings.accent is string && settings.accent.matches('^#[0-9A-Fa-f]{6}$') &&
+        settings.compact is bool &&
+        settings.weekStartsMonday is bool &&
+        settings.hour24 is bool &&
+        settings.defaultPriority in ['p1', 'p2', 'p3', 'p4'];
+    }
+
+    function isValidPayload(payload) {
+      return payload is map &&
+        payload.keys().hasOnly([
+          'version', 'tasks', 'projects', 'lists', 'goals', 'habits', 'focusSessions', 'settings'
+        ]) &&
+        payload.keys().hasAll([
+          'version', 'tasks', 'projects', 'lists', 'goals', 'habits', 'focusSessions', 'settings'
+        ]) &&
+        payload.version is int && payload.version == 1 &&
+        payload.tasks is list && payload.tasks.size() <= 1500 &&
+        payload.projects is list && payload.projects.size() <= 300 &&
+        payload.lists is list && payload.lists.size() <= 300 &&
+        payload.goals is list && payload.goals.size() <= 300 &&
+        payload.habits is list && payload.habits.size() <= 300 &&
+        payload.focusSessions is list && payload.focusSessions.size() <= 1500 &&
+        isValidSettings(payload.settings);
+    }
+
+    function isValidDayflowDocument() {
+      return request.resource.data.keys().hasOnly(['uid', 'schemaVersion', 'updatedAt', 'payload']) &&
+        request.resource.data.keys().hasAll(['uid', 'schemaVersion', 'updatedAt', 'payload']) &&
+        request.resource.data.schemaVersion is int && request.resource.data.schemaVersion == 1 &&
+        request.resource.data.updatedAt is int &&
+        request.resource.data.updatedAt >= 0 &&
+        request.resource.data.updatedAt <= request.time.toMillis() + 300000 &&
+        isValidPayload(request.resource.data.payload);
+    }
+
+    match /users/{userId}/dayflow/{documentId} {
+      allow read: if documentId == 'main' && isOwner(userId);
+      allow create: if documentId == 'main' && isOwner(userId) &&
+        uidUnchanged() && isValidDayflowDocument();
+      allow update: if documentId == 'main' && isOwner(userId) &&
+        uidNotModified() && isValidDayflowDocument();
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

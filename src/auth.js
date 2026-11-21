@@ -16,8 +16,8 @@ const firebaseConfig = {
   appId: '1:813757781225:web:928166f9944a1090564c78',
 };
 
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+export const firebaseApp = initializeApp(firebaseConfig);
+export const auth = getAuth(firebaseApp);
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 

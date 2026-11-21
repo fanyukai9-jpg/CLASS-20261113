@@ -1,5 +1,5 @@
 import { addDays, dateKey, formatDate, formatTime, getGreeting, parseDate, parseQuickDate } from './dates.js';
-import { clearAllData, clearDemoData, createTask, exportData, getData, getUIState, importData, newId, resetDemoData, updateData, updateUI } from './data.js';
+import { activateUserScope, clearAllData, clearDemoData, createTask, exportData, getData, getUIState, importData, newId, resetDemoData, updateData, updateUI } from './data.js';
 import { icon, renderTaskForm, statusLabels } from './components.js';
 import { renderPage } from './pages.js';
 import { createHomeLayouts, defaultHomeLayouts, defaultWidget, renderWidgetPicker, WIDGET_REGISTRY } from './widgets.js';
@@ -13,9 +13,12 @@ let authReady = false;
 let authBusy = false;
 let authError = '';
 let authLoadError = false;
+let cloudClient = null;
+let cloudSyncStatus = 'syncing';
+const appStorageKey = key => authUser?.uid ? `${key}.user.${authUser.uid}` : key;
 const filters = { query: '', priority: '', project: '', date: '', sort: 'date' };
 const selectedTasks = new Set();
-const focus = loadFocus();
+let focus = loadFocus();
 let route = location.hash.replace(/^#\/?/, '').split('?')[0] || getUIState().route || 'today';
 let calendarDate = dateKey();
 let calendarMode = 'month';
@@ -54,7 +57,7 @@ function activeLayoutDevice() {
 
 function loadHomeLayouts() {
   try {
-    const saved = localStorage.getItem('dayflow.home-layout.v3') || localStorage.getItem('dayflow.home-layout.v2') || localStorage.getItem('dayflow.home-layout.v1');
+    const saved = localStorage.getItem(appStorageKey('dayflow.home-layout.v3')) || localStorage.getItem(appStorageKey('dayflow.home-layout.v2')) || localStorage.getItem(appStorageKey('dayflow.home-layout.v1'));
     return createHomeLayouts(saved ? JSON.parse(saved) : {});
   } catch { return defaultHomeLayouts(); }
 }
@@ -62,7 +65,7 @@ function loadHomeLayouts() {
 function saveHomeLayout() {
   try {
     homeLayouts[activeLayoutDevice()] = homeLayout;
-    localStorage.setItem('dayflow.home-layout.v3', JSON.stringify({ layouts: homeLayouts }));
+    localStorage.setItem(appStorageKey('dayflow.home-layout.v3'), JSON.stringify({ layouts: homeLayouts }));
   } catch { /* The home arrangement is optional. */ }
 }
 
@@ -90,12 +93,12 @@ function setLayoutDevice(device) {
 
 function loadFocus() {
   const defaults = { mode: 'focus', durations: { focus: 25, short: 5, long: 15 }, remainingMs: 25 * 60000, running: false, started: false, endAt: 0, taskId: '', completedCount: 0 };
-  try { return { ...defaults, ...JSON.parse(localStorage.getItem('dayflow.focus.v1') || '{}'), durations: { ...defaults.durations, ...(JSON.parse(localStorage.getItem('dayflow.focus.v1') || '{}').durations || {}) } }; }
+  try { return { ...defaults, ...JSON.parse(localStorage.getItem(appStorageKey('dayflow.focus.v1')) || '{}'), durations: { ...defaults.durations, ...(JSON.parse(localStorage.getItem(appStorageKey('dayflow.focus.v1')) || '{}').durations || {}) } }; }
   catch { return defaults; }
 }
 
 function saveFocus() {
-  try { localStorage.setItem('dayflow.focus.v1', JSON.stringify(focus)); } catch { /* Timer state can be recreated. */ }
+  try { localStorage.setItem(appStorageKey('dayflow.focus.v1'), JSON.stringify(focus)); } catch { /* Timer state can be recreated. */ }
 }
 
 function context() {
@@ -110,13 +113,48 @@ function renderAuthGate() {
   app.innerHTML = `<main class="auth-screen"><section class="auth-card" aria-labelledby="auth-title"><div class="auth-mark">D</div><p class="eyebrow">YOUR DAY, IN FLOW</p><h1 id="auth-title">${title}</h1><p class="auth-description">${message}</p>${authReady && !authLoadError ? `<button class="google-sign-in" data-action="google-sign-in" ${authBusy ? 'disabled' : ''}>${googleMark}<span>${authBusy ? '正在連線…' : '使用 Google 帳戶繼續'}</span></button>` : ''}${authLoadError ? '<button class="button button-primary auth-retry" data-action="auth-retry">重新載入</button>' : ''}${authError ? `<p class="auth-error" role="alert">${escapeHTML(authError)}</p>` : ''}<p class="auth-footnote">登入後即可使用 DAYFLOW。你的任務資料仍保存在目前的瀏覽器中。</p></section></main>`;
 }
 
+function confirmCloudDataUpload() {
+  return new Promise(resolve => {
+    const dialog = openDialog('同步目前的 DAYFLOW 資料？', `<p class="confirm-copy">這會將目前裝置中的待辦、專案、清單、目標、習慣、專注紀錄與偏好，寫入 Firebase Firestore 專案 <strong>class-20261016</strong>，並綁定目前的 Google 帳號。之後的變更會同步到該帳號；本機仍會保留一份資料。</p><div class="form-actions"><button class="button button-primary" type="button" data-cloud-consent="yes">同步至 Firebase</button><button class="button" type="button" data-cloud-consent="no">先使用本機</button></div>`);
+    let settled = false;
+    const settle = value => { if (!settled) { settled = true; resolve(value); } };
+    dialog.addEventListener('click', event => {
+      const button = event.target.closest('[data-cloud-consent]');
+      if (!button) return;
+      const accepted = button.dataset.cloudConsent === 'yes';
+      dialog.close();
+      settle(accepted);
+    });
+    dialog.addEventListener('close', () => settle(false), { once: true });
+  });
+}
+
+async function enableCloudDataForCurrentUser() {
+  if (!authUser || !cloudClient) return;
+  const uid = authUser.uid;
+  if (!await confirmCloudDataUpload()) {
+    cloudSyncStatus = 'local-only';
+    render();
+    return;
+  }
+  cloudSyncStatus = 'saving';
+  render();
+  try { await cloudClient.enableInitialUpload(uid); }
+  catch (error) {
+    console.error('DAYFLOW Firestore 初始資料同步失敗。', error);
+    if (authUser?.uid === uid) { cloudSyncStatus = 'error'; toast('雲端同步失敗，資料仍保存在此裝置。', 'error'); render(); }
+  }
+}
+
 function render() {
   if (!authReady || !authUser) { renderAuthGate(); return; }
   const data = getData();
   applyPreferences(data.settings);
   const selected = selectedTasks.size;
+  const cloudLabels = { syncing: '載入雲端', saving: '同步中', synced: '已同步', error: '本機暫存', 'local-only': '僅本機' };
+  const cloudLabel = cloudLabels[cloudSyncStatus] || '載入雲端';
   app.innerHTML = `<div class="app-shell">
-    <div class="app-main"><header class="topbar"><a class="brand" href="#today" data-navigate="today" aria-label="DAYFLOW 首頁"><span class="brand-mark">D</span><span class="brand-name">DAYFLOW</span></a><div class="topbar-actions"><button class="icon-button topbar-icon" data-action="open-search" aria-label="搜尋任務" title="搜尋任務">${icon('search')}</button><button class="button button-primary quick-add-button" data-action="quick-add" aria-label="新增待辦" title="新增待辦" ${route === 'today' ? `data-date="${escapeHTML(homeDate)}"` : ''}>${icon('plus')}<span>新增</span></button><span class="auth-account" title="${escapeHTML(authUser.email || authUser.displayName || '')}">${authUser.photoURL ? `<img src="${escapeHTML(authUser.photoURL)}" alt="">` : `<span class="auth-avatar-fallback">${escapeHTML((authUser.displayName || authUser.email || 'G').slice(0,1).toUpperCase())}</span>`}<span class="auth-account-name">${escapeHTML(authUser.displayName || authUser.email || 'Google 帳戶')}</span></span><button class="button auth-sign-out" data-action="google-sign-out">登出</button><button class="icon-button topbar-icon" data-action="toggle-drawer" aria-label="開啟選單" aria-expanded="${drawerOpen}" title="選單">${icon('menu')}</button></div></header>
+    <div class="app-main"><header class="topbar"><a class="brand" href="#today" data-navigate="today" aria-label="DAYFLOW 首頁"><span class="brand-mark">D</span><span class="brand-name">DAYFLOW</span></a><div class="topbar-actions"><button class="icon-button topbar-icon" data-action="open-search" aria-label="搜尋任務" title="搜尋任務">${icon('search')}</button><button class="button button-primary quick-add-button" data-action="quick-add" aria-label="新增待辦" title="新增待辦" ${route === 'today' ? `data-date="${escapeHTML(homeDate)}"` : ''}>${icon('plus')}<span>新增</span></button><button class="cloud-status cloud-${cloudSyncStatus}" data-action="cloud-enable-sync" ${cloudSyncStatus === 'local-only' || cloudSyncStatus === 'error' ? '' : 'disabled'} title="${cloudSyncStatus === 'local-only' ? '啟用 Firebase 雲端同步' : cloudSyncStatus === 'error' ? '同步暫時失敗，資料仍保存在本機' : `雲端資料${cloudLabel}`}" aria-label="雲端資料狀態：${cloudLabel}"><i></i><span>${cloudLabel}</span></button><span class="auth-account" title="${escapeHTML(authUser.email || authUser.displayName || '')}">${authUser.photoURL ? `<img src="${escapeHTML(authUser.photoURL)}" alt="">` : `<span class="auth-avatar-fallback">${escapeHTML((authUser.displayName || authUser.email || 'G').slice(0,1).toUpperCase())}</span>`}<span class="auth-account-name">${escapeHTML(authUser.displayName || authUser.email || 'Google 帳戶')}</span></span><button class="button auth-sign-out" data-action="google-sign-out">登出</button><button class="icon-button topbar-icon" data-action="toggle-drawer" aria-label="開啟選單" aria-expanded="${drawerOpen}" title="選單">${icon('menu')}</button></div></header>
       <main class="main-content">${renderPage(route, data, context())}</main>
     </div>
     ${drawerOpen ? renderDrawer(data) : ''}
@@ -557,6 +595,7 @@ async function handleAction(action, element) {
       try { await authClient.signOutUser(); }
       catch (error) { toast(authClient.authErrorMessage(error), 'error'); }
       break;
+    case 'cloud-enable-sync': await enableCloudDataForCurrentUser(); break;
     case 'auth-retry': location.reload(); break;
     case 'navigate-projects': setRoute('projects'); break;
     case 'quick-add': openQuickAdd({ inbox: element.dataset.inbox === 'true', projectId: element.dataset.project || '', dueDate: element.dataset.date || (route === 'today' ? homeDate : '') }); break;
@@ -1028,12 +1067,37 @@ async function initializeAuthentication() {
   renderAuthGate();
   try {
     authClient = await import('./auth.js');
-    authClient.observeAuthState(user => {
+    authClient.observeAuthState(async user => {
       authUser = user;
       authReady = true;
       authLoadError = false;
       authError = '';
+      if (!user) {
+        cloudClient?.stopCloudSync();
+        cloudSyncStatus = 'idle';
+        render();
+        return;
+      }
+
+      activateUserScope(user.uid);
+      focus = loadFocus();
+      homeLayouts = loadHomeLayouts();
+      homeLayout = homeLayouts[activeLayoutDevice()];
+      homeEditMode = false;
+      cloudSyncStatus = 'syncing';
       render();
+      try {
+        cloudClient ||= await import('./cloud-store.js');
+        const result = await cloudClient.startCloudSync(user.uid, status => {
+          if (authUser?.uid !== user.uid) return;
+          cloudSyncStatus = status;
+          if (authReady && authUser) render();
+        });
+        if (result?.needsInitialUpload && authUser?.uid === user.uid) await enableCloudDataForCurrentUser();
+      } catch (error) {
+        console.error('DAYFLOW Firestore 啟動失敗。', error);
+        if (authUser?.uid === user.uid) { cloudSyncStatus = 'error'; render(); }
+      }
     });
   } catch (error) {
     console.error('DAYFLOW Firebase Authentication 初始化失敗。', error);
