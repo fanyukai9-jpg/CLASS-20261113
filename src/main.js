@@ -4,7 +4,7 @@ import { icon, renderTaskForm } from './components.js';
 import { renderPage } from './pages.js';
 import { createHomeLayouts, defaultHomeLayouts, defaultWidget, renderWidgetPicker, WIDGET_REGISTRY } from './widgets.js';
 import { confirmDialog, escapeHTML, openDialog, toast } from './ui.js';
-import { askDayflowAI, buildAIContext, getAIStatus, validateAIAction } from './ai.js?v=dayflow-ai-5';
+import { askDayflowAI, buildAIContext, getAIStatus, validateAIAction } from './ai.js?v=dayflow-ai-lite-1';
 
 const app = document.getElementById('app');
 const dialogRoot = document.getElementById('dialog-root');

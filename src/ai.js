@@ -5,7 +5,7 @@ import { validateAIAction } from './ai-validation.js';
 
 export { buildAIContext, validateAIAction };
 
-export const AI_MODEL = 'gemini-3.8-flash';
+export const AI_MODEL = 'gemini-3.5-flash-lite';
 const MAX_REQUESTS_PER_MINUTE = 5;
 const MAX_HISTORY_ITEMS = 12;
 const MAX_HISTORY_MESSAGE_LENGTH = 2000;

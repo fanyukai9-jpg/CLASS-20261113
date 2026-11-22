@@ -24,7 +24,7 @@ python3 -m http.server 4173
 
 ## DAYFLOW AI 與 App Check
 
-Firebase AI Logic 已在 Firebase 專案 `class-20261016` 的 Web App 啟用，並以 Gemini Developer API 的 `gemini-3.8-flash` 產生 JSON 結果。前端不放 Gemini API Key；`src/runtime-config.js` 的 reCAPTCHA Enterprise Site Key 是公開的網站金鑰，並限制於 Firebase Hosting 網域 `class-20261016.web.app`。App Check provider 已在 Firebase 註冊。
+Firebase AI Logic 已在 Firebase 專案 `class-20261016` 的 Web App 啟用，並以 Gemini Developer API 的 `gemini-3.5-flash-lite` 產生 JSON 結果。前端不放 Gemini API Key；`src/runtime-config.js` 的 reCAPTCHA Enterprise Site Key 是公開的網站金鑰，並限制於 Firebase Hosting 網域 `class-20261016.web.app` 與 GitHub Pages 網域 `fanyukai9-jpg.github.io`。App Check provider 已在 Firebase 註冊。
 
 DAYFLOW 每個瀏覽器最多送出 5 次 AI 請求／分鐘；Firebase 專案或模型本身也可能有較低的配額，或暫時無法服務。
 
