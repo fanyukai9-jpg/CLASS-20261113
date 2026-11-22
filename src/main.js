@@ -4,7 +4,7 @@ import { icon, renderTaskForm } from './components.js';
 import { renderPage } from './pages.js';
 import { createHomeLayouts, defaultHomeLayouts, defaultWidget, renderWidgetPicker, WIDGET_REGISTRY } from './widgets.js';
 import { confirmDialog, escapeHTML, openDialog, toast } from './ui.js';
-import { askDayflowAI, buildAIContext, getAIStatus, validateAIAction } from './ai.js?v=dayflow-ai-lite-1';
+import { askDayflowAI, buildAIContext, getAIStatus, validateAIAction } from './ai.js?v=dayflow-ai-add-1';
 
 const app = document.getElementById('app');
 const dialogRoot = document.getElementById('dialog-root');
@@ -152,13 +152,15 @@ function renderAIPanel() {
   const suggestions = aiPrompts(feature);
   const thread = aiMessages.map((message, index) => {
     const content = `<p>${escapeHTML(message.text)}</p>`;
+    const pendingCount = message.actions?.filter((_, actionIndex) => !message.applied?.includes(actionIndex)).length || 0;
+    const autoAddedCount = message.autoAdded?.length || 0;
     const proposal = message.role === 'model' && message.actions?.length
-      ? `<div class="ai-proposal-note">${message.applied?.length ? `已套用 ${message.applied.length} 項` : `${message.actions.length} 項待確認操作`}<button class="text-button" type="button" data-action="ai-preview" data-message="${index}">檢視方案</button></div>` : '';
+      ? `<div class="ai-proposal-note">${autoAddedCount ? `已直接新增 ${autoAddedCount} 項待辦` : message.applied?.length ? `已套用 ${message.applied.length} 項` : ''}${autoAddedCount && pendingCount ? ' · ' : ''}${pendingCount ? `${pendingCount} 項待確認操作` : ''}${pendingCount ? `<button class="text-button" type="button" data-action="ai-preview" data-message="${index}">檢視方案</button>` : ''}</div>` : '';
     return `<article class="ai-message ai-message-${message.role}"><span class="ai-message-label">${message.role === 'user' ? '你' : 'DAYFLOW AI'}</span>${content}${proposal}</article>`;
   }).join('');
   const preview = aiPreviewMessage == null ? '' : renderAIProposalPreview(aiPreviewMessage);
   const ready = status.ready;
-  return `<section class="ai-panel" aria-label="DAYFLOW AI 助理"><div class="ai-panel-intro"><span class="ai-mark">D</span><div><strong>依照目前情境協助你</strong><span>${escapeHTML(status.message)}</span></div></div><div class="ai-privacy-note">送出後只會傳送這次功能所需的任務、習慣與專注摘要至 Firebase AI Logic；對話只保存在此裝置。</div><div class="ai-thread" data-ai-thread aria-live="polite">${thread || `<div class="ai-welcome"><strong>你想先整理哪一件事？</strong><span>我會參考${escapeHTML(({ today: '今天的待辦', calendar: '行事曆與近期安排', habits: '習慣紀錄', habit: '這個習慣', task: '這項待辦', focus: '目前專注狀態與未完成任務', search: 'DAYFLOW 的近期安排' })[feature] || 'DAYFLOW 的近期安排')}，建議操作會先列出預覽，經你確認後才寫入。</span></div>`}${preview}</div><div class="ai-suggestions">${suggestions.map(prompt => `<button type="button" class="ai-suggestion" data-action="ai-prompt" data-prompt="${escapeHTML(prompt)}" ${!ready || aiBusy ? 'disabled' : ''}>${escapeHTML(prompt)}</button>`).join('')}</div><form class="ai-composer" data-form="ai-chat"><textarea name="message" rows="2" maxlength="2000" placeholder="說說你想完成什麼…" aria-label="詢問 DAYFLOW AI" required ${!ready || aiBusy ? 'disabled' : ''}></textarea><div class="ai-composer-footer"><button class="text-button" type="button" data-action="ai-clear" ${!aiMessages.length || aiBusy ? 'disabled' : ''}>清除對話</button><button class="button button-primary" type="submit" ${!ready || aiBusy ? 'disabled' : ''}>${aiBusy ? '整理中…' : '送出'}</button></div></form></section>`;
+  return `<section class="ai-panel" aria-label="DAYFLOW AI 助理"><div class="ai-panel-intro"><span class="ai-mark">D</span><div><strong>依照目前情境協助你</strong><span>${escapeHTML(status.message)}</span></div></div><div class="ai-privacy-note">送出後只會傳送這次功能所需的任務、習慣與專注摘要至 Firebase AI Logic；對話只保存在此裝置。</div><div class="ai-thread" data-ai-thread aria-live="polite">${thread || `<div class="ai-welcome"><strong>你想先整理哪一件事？</strong><span>我會參考${escapeHTML(({ today: '今天的待辦', calendar: '行事曆與近期安排', habits: '習慣紀錄', habit: '這個習慣', task: '這項待辦', focus: '目前專注狀態與未完成任務', search: 'DAYFLOW 的近期安排' })[feature] || 'DAYFLOW 的近期安排')}；新增待辦會直接加入，其他操作會先預覽並由你確認。</span></div>`}${preview}</div><div class="ai-suggestions">${suggestions.map(prompt => `<button type="button" class="ai-suggestion" data-action="ai-prompt" data-prompt="${escapeHTML(prompt)}" ${!ready || aiBusy ? 'disabled' : ''}>${escapeHTML(prompt)}</button>`).join('')}</div><form class="ai-composer" data-form="ai-chat"><textarea name="message" rows="2" maxlength="2000" placeholder="說說你想完成什麼…" aria-label="詢問 DAYFLOW AI" required ${!ready || aiBusy ? 'disabled' : ''}></textarea><div class="ai-composer-footer"><button class="text-button" type="button" data-action="ai-clear" ${!aiMessages.length || aiBusy ? 'disabled' : ''}>清除對話</button><button class="button button-primary" type="submit" ${!ready || aiBusy ? 'disabled' : ''}>${aiBusy ? '整理中…' : '送出'}</button></div></form></section>`;
 }
 
 function refreshAIPanel(keepScroll = true) {
@@ -192,7 +194,9 @@ async function sendAIMessage(value) {
   saveAIMessages(); aiBusy = true; refreshAIPanel(false);
   try {
     const answer = await askDayflowAI(message, { context, history });
-    aiMessages.push({ role: 'model', text: answer.reply || '我已整理好建議。', actions: answer.actions });
+    const response = { role: 'model', text: answer.reply || '我已整理好建議。', actions: answer.actions };
+    aiMessages.push(response);
+    autoAddAITasks(response);
     saveAIMessages();
   } catch (error) {
     aiMessages.push({ role: 'model', text: error.message || '目前無法連線 AI，DAYFLOW 其他功能仍可正常使用。' });
@@ -265,9 +269,28 @@ function renderAIProposalPreview(messageIndex) {
   const message = aiMessages[messageIndex];
   if (!message?.actions?.length) return '';
   const data = getData();
-  const validItems = message.actions.map((action, index) => ({ action, index, check: validateAIProposal(action, data) }));
+  const validItems = message.actions.map((action, index) => ({ action, index, check: validateAIProposal(action, data) })).filter(({ index }) => !message.applied?.includes(index));
   const hasScheduleConflict = proposalScheduleConflicts(message.actions, data).length > 0;
   return `<section class="ai-inline-preview"><div class="ai-preview-heading"><strong>AI 操作預覽</strong><button class="text-button" type="button" data-action="ai-preview-close">收起</button></div><p class="ai-preview-copy">只套用已勾選的項目；資料會在確認後才更新。</p>${hasScheduleConflict ? '<p class="ai-conflict-note">方案包含互相重疊的時段；請取消其中一個，系統也會在套用前再次檢查。</p>' : ''}<div class="ai-preview-list">${validItems.map(({ action, index, check }) => `<label class="ai-preview-item ${check.valid ? '' : 'is-invalid'}"><input type="checkbox" data-ai-proposal-index="${index}" ${check.valid ? 'checked' : 'disabled'}><span><strong>${escapeHTML(aiProposalLabel(action, data))}</strong><small>${escapeHTML(action.reason || 'AI 建議')}</small>${check.valid ? '' : `<em>${escapeHTML(check.message)}</em>`}</span></label>`).join('')}</div><div class="form-actions"><button class="button button-primary" type="button" data-action="ai-apply" data-message="${messageIndex}" ${validItems.every(item => !item.check.valid) ? 'disabled' : ''}>確認套用已選項目</button></div></section>`;
+}
+
+function autoAddAITasks(message) {
+  if (!message.actions?.length) return;
+  const data = getData();
+  const conflicts = new Set(proposalScheduleConflicts(message.actions, data).flat());
+  const additions = message.actions
+    .map((action, index) => ({ action, index }))
+    .filter(({ action, index }) => action.type === 'create_task' && !conflicts.has(index) && validateAIProposal(action, data).valid);
+  if (!additions.length) return;
+  updateData(next => {
+    for (const { action } of additions) {
+      next.tasks.push(createTask({ title: String(action.title).trim(), dueDate: action.dueDate || dateKey(), startTime: action.startTime || '', priority: action.priority === 'none' ? '' : action.priority, estimateMinutes: action.estimateMinutes || '', notes: String(action.notes || '').slice(0, 1000) }));
+    }
+  });
+  message.applied = [...new Set([...(message.applied || []), ...additions.map(({ index }) => index)])];
+  message.autoAdded = [...new Set([...(message.autoAdded || []), ...additions.map(({ index }) => index)])];
+  toast(`已直接新增 ${additions.length} 項待辦`);
+  render();
 }
 
 function showAIProposal(messageIndex) {
