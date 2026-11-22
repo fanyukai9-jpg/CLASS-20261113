@@ -1,7 +1,7 @@
 import { addDays, dateKey, formatDate, formatTime, parseDate, parseQuickDate } from './dates.js';
 import { activateUserScope, createTask, exportData, getData, getUIState, importData, newId, updateData, updateUI } from './data.js';
 import { icon, renderTaskForm } from './components.js';
-import { renderPage } from './pages.js?v=dayflow-home-2';
+import { renderPage, renderSearchResults } from './pages.js?v=dayflow-input-1';
 import { createHomeLayout, createHomeLayouts, defaultHomeLayouts, defaultWidget, renderWidgetPicker, WIDGET_REGISTRY } from './widgets.js?v=dayflow-home-2';
 import { confirmDialog, escapeHTML, openDialog, toast } from './ui.js';
 import { askDayflowAI, buildAIContext, getAIStatus, validateAIAction } from './ai.js?v=dayflow-ai-add-1';
@@ -823,9 +823,16 @@ function handleInput(event) {
   const target = event.target;
   if (target.id === 'search-page-input') {
     query = target.value;
-    clearTimeout(filterRenderTimer);
-    filterRenderTimer = setTimeout(() => { render(); const input = document.getElementById('search-page-input'); input?.focus(); input?.setSelectionRange(query.length, query.length); }, 160);
+    if (!event.isComposing) scheduleSearchResults();
   }
+}
+
+function scheduleSearchResults() {
+  clearTimeout(filterRenderTimer);
+  filterRenderTimer = setTimeout(() => {
+    const results = document.querySelector('[data-search-results]');
+    if (route === 'search' && results) results.innerHTML = renderSearchResults(getData(), query);
+  }, 120);
 }
 
 function handleClick(event) {
@@ -1083,6 +1090,12 @@ document.addEventListener('click', handleClick);
 document.addEventListener('submit', handleSubmit);
 document.addEventListener('change', handleChange);
 document.addEventListener('input', handleInput);
+document.addEventListener('compositionend', event => {
+  if (event.target?.id === 'search-page-input') {
+    query = event.target.value;
+    scheduleSearchResults();
+  }
+});
 document.addEventListener('change', handleFile);
 document.addEventListener('dragstart', handleDragStart);
 document.addEventListener('dragend', handleDragEnd);
