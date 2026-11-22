@@ -41,6 +41,9 @@ let homeDate = dateKey();
 let observedToday = homeDate;
 let homeCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
 let drawerOpen = false;
+let accountMenuOpen = false;
+let focusKeypadOpen = false;
+let focusDurationDraft = '';
 let homeEditMode = false;
 let homeTransitionDirection = 0;
 let renderedLayoutDevice = detectLayoutDevice();
@@ -364,7 +367,7 @@ async function applyAIProposal(messageIndex) {
 
 function context() {
   if (focus.running) focus.remainingMs = Math.max(0, focus.endAt - Date.now());
-  return { taskSort, taskStatusFilter, calendarDate, query, focus, homeDate, homeCalendarMonth, homeLayout, homeEditMode, homeTransitionDirection, layoutDevice: detectLayoutDevice() };
+  return { taskSort, taskStatusFilter, calendarDate, query, focus, focusKeypadOpen, focusDurationDraft, homeDate, homeCalendarMonth, homeLayout, homeEditMode, homeTransitionDirection, layoutDevice: detectLayoutDevice() };
 }
 
 function renderAuthGate() {
@@ -414,7 +417,7 @@ function render() {
   const cloudLabels = { syncing: '載入雲端', saving: '同步中', synced: '已同步', error: '本機暫存', 'local-only': '僅本機' };
   const cloudLabel = cloudLabels[cloudSyncStatus] || '載入雲端';
   app.innerHTML = `<div class="app-shell">
-      <div class="app-main"><header class="topbar"><div class="topbar-inner"><a class="brand" href="#today" data-navigate="today" aria-label="DAYFLOW 首頁"><span class="brand-mark">D</span><span class="brand-name">DAYFLOW</span></a><nav class="primary-nav" aria-label="主要功能">${[['today','今天'],['calendar','行事曆'],['habits','習慣'],['focus','專注']].map(([id,label]) => `<a href="#${id}" data-navigate="${id}" class="${route === id ? 'is-active' : ''}">${label}</a>`).join('')}</nav><div class="topbar-actions"><button class="button ai-launch-button" data-action="ai-open" aria-label="開啟 DAYFLOW AI 助理" title="以目前功能情境開啟 AI 助理"><span aria-hidden="true">✳</span> AI</button><button class="icon-button topbar-icon" data-action="open-search" aria-label="搜尋待辦" title="搜尋待辦">${icon('search')}</button><button class="button button-primary quick-add-button" data-action="quick-add" aria-label="新增待辦" title="新增待辦">${icon('plus')}<span>新增</span></button><button class="cloud-status cloud-${cloudSyncStatus}" data-action="cloud-enable-sync" ${cloudSyncStatus === 'local-only' || cloudSyncStatus === 'error' ? '' : 'disabled'} title="${cloudSyncStatus === 'local-only' ? '啟用 Firebase 雲端同步' : cloudSyncStatus === 'error' ? '同步暫時失敗，資料仍保存在本機' : `雲端資料${cloudLabel}`}" aria-label="雲端資料狀態：${cloudLabel}"><i></i><span>${cloudLabel}</span></button><span class="auth-account" title="${escapeHTML(authUser.email || authUser.displayName || '')}">${authUser.photoURL ? `<img src="${escapeHTML(authUser.photoURL)}" alt="">` : `<span class="auth-avatar-fallback">${escapeHTML((authUser.displayName || authUser.email || 'G').slice(0,1).toUpperCase())}</span>`}<span class="auth-account-name">${escapeHTML(authUser.displayName || authUser.email || 'Google 帳戶')}</span></span><button class="button auth-sign-out" data-action="google-sign-out">登出</button><button class="icon-button topbar-icon mobile-menu-button" data-action="toggle-drawer" aria-label="開啟選單" aria-expanded="${drawerOpen}" title="選單">${icon('menu')}</button></div></div></header>
+      <div class="app-main"><header class="topbar"><div class="topbar-inner"><a class="brand" href="#today" data-navigate="today" aria-label="DAYFLOW 首頁"><span class="brand-mark">D</span><span class="brand-name">DAYFLOW</span></a><nav class="primary-nav" aria-label="主要功能">${[['today','今天'],['calendar','行事曆'],['habits','習慣'],['focus','專注']].map(([id,label]) => `<a href="#${id}" data-navigate="${id}" class="${route === id ? 'is-active' : ''}">${label}</a>`).join('')}</nav><div class="topbar-actions"><button class="button ai-launch-button" data-action="ai-open" aria-label="開啟 DAYFLOW AI 助理" title="以目前功能情境開啟 AI 助理"><span aria-hidden="true">✳</span> AI</button><button class="icon-button topbar-icon" data-action="open-search" aria-label="搜尋待辦" title="搜尋待辦">${icon('search')}</button><button class="button button-primary quick-add-button" data-action="quick-add" aria-label="新增待辦" title="新增待辦">${icon('plus')}<span>新增</span></button><button class="cloud-status cloud-${cloudSyncStatus}" data-action="cloud-enable-sync" ${cloudSyncStatus === 'local-only' || cloudSyncStatus === 'error' ? '' : 'disabled'} title="${cloudSyncStatus === 'local-only' ? '啟用 Firebase 雲端同步' : cloudSyncStatus === 'error' ? '同步暫時失敗，資料仍保存在本機' : `雲端資料${cloudLabel}`}" aria-label="雲端資料狀態：${cloudLabel}"><i></i><span>${cloudLabel}</span></button><div class="account-menu ${accountMenuOpen ? 'is-open' : ''}"><button class="auth-account" type="button" data-action="toggle-account-menu" aria-label="帳戶選單" aria-expanded="${accountMenuOpen}" title="帳戶選單">${authUser.photoURL ? `<img src="${escapeHTML(authUser.photoURL)}" alt="">` : `<span class="auth-avatar-fallback">${escapeHTML((authUser.displayName || authUser.email || 'G').slice(0,1).toUpperCase())}</span>`}</button>${accountMenuOpen ? '<div class="account-menu-popover"><button class="account-menu-sign-out" data-action="google-sign-out">登出</button></div>' : ''}</div><button class="icon-button topbar-icon mobile-menu-button" data-action="toggle-drawer" aria-label="開啟選單" aria-expanded="${drawerOpen}" title="選單">${icon('menu')}</button></div></div></header>
       <main class="main-content">${renderPage(route, data, context())}</main>
     </div>
     ${drawerOpen ? renderDrawer() : ''}
@@ -751,6 +754,15 @@ async function handleAction(action, element) {
     case 'task-delete': await deleteTask(id); break;
     case 'close-dialog': dialogRoot.querySelector('dialog')?.close(); break;
     case 'toggle-drawer': drawerOpen = !drawerOpen; render(); break;
+    case 'toggle-account-menu': accountMenuOpen = !accountMenuOpen; render(); break;
+    case 'focus-key': {
+      const key = element.dataset.key;
+      if (key === 'done') { focusKeypadOpen = false; setFocusDuration(focusDurationDraft); break; }
+      if (key === 'clear') focusDurationDraft = '';
+      else if (key === 'back') focusDurationDraft = focusDurationDraft.slice(0, -1);
+      else if (focusDurationDraft.length < 3) focusDurationDraft += key;
+      render(); break;
+    }
     case 'close-drawer': drawerOpen = false; render(); break;
     case 'open-search': query = ''; setRoute('search'); setTimeout(() => document.getElementById('search-page-input')?.focus(), 0); break;
     case 'task-status-filter': taskStatusFilter = element.dataset.filter; render(); break;
@@ -812,12 +824,18 @@ function handleSubmit(event) {
 function handleChange(event) {
   const target = event.target;
   if (target.matches('[data-task-sort]')) { taskSort = target.value; render(); return; }
-  if (target.matches('[data-focus-duration]')) { setFocusDuration(target.value); return; }
+  if (target.matches('[data-focus-duration]')) { focusKeypadOpen = false; setFocusDuration(target.value); return; }
   if (target.matches('[data-setting]')) {
     if (target.dataset.setting === 'focus-task') { persistFocusTask(target.value); return; }
     persistSetting(target.dataset.setting, target.value); return;
   }
 }
+
+document.addEventListener('focusin', event => {
+  if (!event.target.matches('[data-focus-duration]') || focus.started || focus.running) return;
+  focusDurationDraft = event.target.value || String(focus.durations[focus.mode]);
+  focusKeypadOpen = true; render();
+});
 
 function handleInput(event) {
   const target = event.target;
