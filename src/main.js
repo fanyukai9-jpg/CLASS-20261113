@@ -96,15 +96,19 @@ function setLayoutDevice(device) {
 }
 
 function loadFocus() {
-  const defaults = { mode: 'focus', durations: { focus: 25, rest: 5 }, remainingMs: 25 * 60000, running: false, started: false, endAt: 0, taskId: '', focusGoal: '', completedCount: 0 };
+  const defaults = { mode: 'focus', durations: { focus: 25, rest: 10 }, remainingMs: 25 * 60000, running: false, started: false, endAt: 0, taskId: '', focusGoal: '', completedCount: 0 };
   try {
     const saved = JSON.parse(localStorage.getItem(appStorageKey('dayflow.focus.v1')) || '{}');
     const oldDurations = saved.durations && typeof saved.durations === 'object' ? saved.durations : {};
-    const restDuration = oldDurations.rest ?? (saved.mode === 'long' ? oldDurations.long : oldDurations.short) ?? oldDurations.short ?? oldDurations.long ?? defaults.durations.rest;
+    const oldRestDuration = oldDurations.rest ?? (saved.mode === 'long' ? oldDurations.long : oldDurations.short) ?? oldDurations.short ?? oldDurations.long ?? defaults.durations.rest;
+    const legacyRestDefault = [5, 15].includes(Number(oldRestDuration));
+    const restDuration = legacyRestDefault ? defaults.durations.rest : oldRestDuration;
     const normalizeDuration = (value, fallback) => Number.isFinite(Number(value)) ? Math.max(1, Math.min(120, Math.round(Number(value)))) : fallback;
     const durations = { focus: normalizeDuration(oldDurations.focus, defaults.durations.focus), rest: normalizeDuration(restDuration, defaults.durations.rest) };
     const mode = ['rest', 'short', 'long'].includes(saved.mode) ? 'rest' : 'focus';
-    return { ...defaults, ...saved, mode, durations, remainingMs: Number.isFinite(Number(saved.remainingMs)) && Number(saved.remainingMs) >= 0 ? Number(saved.remainingMs) : durations[mode] * 60000 };
+    const savedRemaining = Number(saved.remainingMs);
+    const migrateRestCountdown = legacyRestDefault && !saved.running && !saved.started && mode === 'rest' && savedRemaining === Number(oldRestDuration) * 60000;
+    return { ...defaults, ...saved, mode, durations, remainingMs: migrateRestCountdown ? durations.rest * 60000 : Number.isFinite(savedRemaining) && savedRemaining >= 0 ? savedRemaining : durations[mode] * 60000 };
   }
   catch { return defaults; }
 }
@@ -648,7 +652,7 @@ function timerFinish() {
     toast(taskName ? `已完成專注：${taskName}` : '專注時段完成');
     focus.mode = 'rest';
   } else { toast('休息結束，準備開始下一段專注', 'info'); focus.mode = 'focus'; }
-  focus.remainingMs = Number(focus.durations[focus.mode] || 5) * 60000;
+  focus.remainingMs = Number(focus.durations[focus.mode] || (focus.mode === 'rest' ? 10 : 25)) * 60000;
   saveFocus(); render();
 }
 

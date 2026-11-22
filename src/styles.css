@@ -1094,3 +1094,10 @@ body { font-size: 15px; line-height: 1.6; }
   .widget-habit-history-row { grid-template-columns: minmax(58px, .8fr) minmax(0, 3fr); gap: 6px; }
   .widget-habit-history-cells { gap: 2px; }
 }
+
+.home-widget-card[data-widget-type="focusTimer"] .home-widget-content { justify-items: center; gap: 12px; }
+.home-widget-card[data-widget-type="focusTimer"] .mini-focus { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 8px; text-align: center; }
+.home-widget-card[data-widget-type="focusTimer"] .mini-focus-ring { width: clamp(88px, 10vw, 112px); height: clamp(88px, 10vw, 112px); }
+.home-widget-card[data-widget-type="focusTimer"] .mini-focus-ring::before { inset: 7px; width: auto; height: auto; }
+.home-widget-card[data-widget-type="focusTimer"] .mini-focus-ring strong { font-size: clamp(15px, 1.6vw, 19px); }
+.home-widget-card[data-widget-type="focusTimer"] .home-widget-content > .button-small { justify-self: center; }
