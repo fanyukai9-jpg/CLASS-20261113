@@ -1,4 +1,4 @@
-import { dateKey, dayLabel } from './dates.js';
+import { addDays, dateKey, datesInRange, dayLabel } from './dates.js';
 import { escapeHTML } from './ui.js';
 import { icon } from './components.js';
 
@@ -18,17 +18,25 @@ function renderContent(type, data, context, item) {
     const done = habits.filter(habit => habit.logs?.[today]).length;
     return `<p class="widget-summary">${done}<span> / ${habits.length} 個今日習慣完成</span></p>${habits.slice(0, 3).map(habit => `<button class="widget-task" data-action="toggle-habit" data-id="${escapeHTML(habit.id)}"><span>${escapeHTML(habit.name)}</span><b class="widget-habit-status">${habit.logs?.[today] ? '✓' : '○'}</b></button>`).join('') || '<p class="empty-inline">尚未安排今日習慣。</p>'}${link('habits', '查看習慣')}`;
   }
+  if (type === 'habitHistory28') {
+    const days = datesInRange(addDays(today, -27), 28);
+    if (!data.habits.length) return `<p class="empty-inline">新增習慣後，這裡會顯示最近 28 天的每日紀錄。</p>${link('habits', '新增習慣')}`;
+    return `<div class="widget-habit-history"><div class="widget-habit-history-range"><span>${escapeHTML(dayLabel(dateKey(days[0])))}</span><span>最近 28 天</span><span>${escapeHTML(dayLabel(today))}</span></div><div class="widget-habit-history-legend"><span><i class="widget-habit-history-cell is-done" aria-hidden="true"></i>已完成</span><span><i class="widget-habit-history-cell" aria-hidden="true"></i>未完成</span></div>${data.habits.map(habit => `<div class="widget-habit-history-row"><span class="widget-habit-history-name" title="${escapeHTML(habit.name)}">${escapeHTML(habit.name)}</span><div class="widget-habit-history-cells" role="group" aria-label="${escapeHTML(habit.name)} 最近 28 天每日紀錄">${days.map(day => { const key = dateKey(day); const done = Boolean(habit.logs?.[key]); return `<i class="widget-habit-history-cell ${done ? 'is-done' : ''}" role="img" title="${escapeHTML(dayLabel(key))} · ${done ? '已完成' : '未完成'}" aria-label="${escapeHTML(dayLabel(key))} ${done ? '已完成' : '未完成'}" style="--habit-color:${escapeHTML(habit.color || '#777')}"></i>`; }).join('')}</div></div>`).join('')}</div>${link('habits', '查看完整紀錄')}`;
+  }
   const focus = context.focus;
   const duration = Number(focus.durations[focus.mode] || 25) * 60000;
   const remaining = Math.max(0, focus.running ? focus.endAt - Date.now() : focus.started ? focus.remainingMs : duration);
   const progress = Math.max(0, Math.min(100, (1 - remaining / duration) * 100));
   const time = `${String(Math.floor(remaining / 60000)).padStart(2, '0')}:${String(Math.floor(remaining % 60000 / 1000)).padStart(2, '0')}`;
-  return `<button class="mini-focus" data-navigate="focus" aria-label="開啟${escapeHTML(item.name || '專注計時')}"><span class="mini-focus-ring" style="--focus-progress:${progress}%"><strong id="home-focus-clock">${time}</strong></span><span>${focus.running ? '專注進行中' : focus.started ? '已暫停' : '準備開始'}</span></button><button class="button button-small" data-action="${focus.running ? 'focus-pause' : 'focus-start'}">${focus.running ? '暫停' : focus.started ? '繼續' : '開始專注'}</button>`;
+  const modeLabel = focus.mode === 'rest' ? '休息' : '專注';
+  const status = focus.running ? `${modeLabel}中` : focus.started ? '已暫停' : `準備${modeLabel}`;
+  return `<button class="mini-focus" data-navigate="focus" aria-label="開啟${escapeHTML(item.name || '專注計時')}"><span class="mini-focus-ring" style="--focus-progress:${progress}%"><strong id="home-focus-clock">${time}</strong></span><span>${status}</span></button><button class="button button-small" data-action="${focus.running ? 'focus-pause' : 'focus-start'}">${focus.running ? '暫停' : focus.started ? '繼續' : `開始${modeLabel}`}</button>`;
 }
 
 export const WIDGET_REGISTRY = {
   upcoming: { name: '接下來', category: '待辦', description: '近期與尚未安排日期的待辦', route: 'calendar', icon: 'calendar', size: 'medium', render: renderContent },
   habits: { name: '習慣追蹤', category: '習慣', description: '完成今日習慣並查看進度', route: 'habits', icon: 'habits', size: 'medium', render: renderContent },
+  habitHistory28: { name: '習慣最近 28 天', category: '習慣', description: '查看每個習慣最近 28 天的每日完成記錄', route: 'habits', icon: 'habits', size: 'large', render: renderContent },
   focusTimer: { name: '專注計時', category: '專注', description: '查看並控制目前的專注計時', route: 'focus', icon: 'focus', size: 'small', render: renderContent },
 };
 
@@ -37,13 +45,13 @@ export const WIDGET_CATEGORIES = [...new Set(Object.values(WIDGET_REGISTRY).map(
 export const defaultWidget = (type, id = `${type}-${globalThis.crypto?.randomUUID?.() || Date.now().toString(36)}`) => ({ id, type, name: WIDGET_REGISTRY[type]?.name || type, size: WIDGET_REGISTRY[type]?.size || 'medium', config: {} });
 
 const layoutSeeds = {
-  desktop: [defaultWidget('upcoming', 'upcoming'), defaultWidget('habits', 'habits'), defaultWidget('focusTimer', 'focus')],
-  tablet: [defaultWidget('upcoming', 'upcoming'), defaultWidget('habits', 'habits'), defaultWidget('focusTimer', 'focus')],
-  mobile: [defaultWidget('upcoming', 'upcoming'), defaultWidget('habits', 'habits'), defaultWidget('focusTimer', 'focus')].map(item => ({ ...item, size: 'small' })),
+  desktop: [defaultWidget('upcoming', 'upcoming'), defaultWidget('habits', 'habits'), defaultWidget('focusTimer', 'focus'), defaultWidget('habitHistory28', 'habit-history-28')],
+  tablet: [defaultWidget('upcoming', 'upcoming'), defaultWidget('habits', 'habits'), defaultWidget('focusTimer', 'focus'), defaultWidget('habitHistory28', 'habit-history-28')],
+  mobile: [defaultWidget('upcoming', 'upcoming'), defaultWidget('habits', 'habits'), defaultWidget('focusTimer', 'focus'), defaultWidget('habitHistory28', 'habit-history-28')].map(item => ({ ...item, size: item.type === 'habitHistory28' ? 'large' : 'small' })),
 };
 
 function normalizeType(type) {
-  return ({ calendar: 'upcoming', monthCalendar: 'upcoming', focus: 'focusTimer', pomodoro: 'focusTimer', focusHistory: 'focusTimer', dailyHabits: 'habits', weeklyHabits: 'habits' })[type] || type;
+  return ({ calendar: 'upcoming', monthCalendar: 'upcoming', focus: 'focusTimer', pomodoro: 'focusTimer', focusHistory: 'focusTimer', dailyHabits: 'habits', weeklyHabits: 'habits', habitHistory: 'habitHistory28', dailyHabitHistory: 'habitHistory28', recentHabits: 'habitHistory28' })[type] || type;
 }
 
 function normalizeLayout(stored = {}, device = 'desktop') {
@@ -57,6 +65,7 @@ function normalizeLayout(stored = {}, device = 'desktop') {
       const oldDefaultName = item.name === item.type || item.name === WIDGET_REGISTRY[type].name || item.type === 'calendar' && item.name === '行事曆';
       return [{ ...defaultWidget(type, item.id || undefined), ...item, type, name: oldDefaultName ? WIDGET_REGISTRY[type].name : item.name, config: {} }];
     });
+    if (!items.some(item => item.type === 'habitHistory28')) items.push(defaultWidget('habitHistory28', `habit-history-28-${device}`));
     return { items, hidden: Array.isArray(stored.hidden) ? [...new Set(stored.hidden.filter(id => items.some(item => item.id === id)))] : [], locked: Boolean(stored.locked) };
   }
   const oldOrder = Array.isArray(stored.order) ? stored.order : [];

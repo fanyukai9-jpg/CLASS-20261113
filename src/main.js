@@ -36,8 +36,6 @@ let widgetPressTimer = 0;
 let widgetDragSession = null;
 let layoutUndo = null;
 let suppressWidgetResizeClickUntil = 0;
-let focusWheelScrollTimer;
-const userScrolledFocusWheels = new WeakSet();
 let filterRenderTimer;
 let homeDate = dateKey();
 let observedToday = homeDate;
@@ -98,8 +96,16 @@ function setLayoutDevice(device) {
 }
 
 function loadFocus() {
-  const defaults = { mode: 'focus', durations: { focus: 25, short: 5, long: 15 }, remainingMs: 25 * 60000, running: false, started: false, endAt: 0, taskId: '', focusGoal: '', completedCount: 0 };
-  try { return { ...defaults, ...JSON.parse(localStorage.getItem(appStorageKey('dayflow.focus.v1')) || '{}'), durations: { ...defaults.durations, ...(JSON.parse(localStorage.getItem(appStorageKey('dayflow.focus.v1')) || '{}').durations || {}) } }; }
+  const defaults = { mode: 'focus', durations: { focus: 25, rest: 5 }, remainingMs: 25 * 60000, running: false, started: false, endAt: 0, taskId: '', focusGoal: '', completedCount: 0 };
+  try {
+    const saved = JSON.parse(localStorage.getItem(appStorageKey('dayflow.focus.v1')) || '{}');
+    const oldDurations = saved.durations && typeof saved.durations === 'object' ? saved.durations : {};
+    const restDuration = oldDurations.rest ?? (saved.mode === 'long' ? oldDurations.long : oldDurations.short) ?? oldDurations.short ?? oldDurations.long ?? defaults.durations.rest;
+    const normalizeDuration = (value, fallback) => Number.isFinite(Number(value)) ? Math.max(1, Math.min(120, Math.round(Number(value)))) : fallback;
+    const durations = { focus: normalizeDuration(oldDurations.focus, defaults.durations.focus), rest: normalizeDuration(restDuration, defaults.durations.rest) };
+    const mode = ['rest', 'short', 'long'].includes(saved.mode) ? 'rest' : 'focus';
+    return { ...defaults, ...saved, mode, durations, remainingMs: Number.isFinite(Number(saved.remainingMs)) && Number(saved.remainingMs) >= 0 ? Number(saved.remainingMs) : durations[mode] * 60000 };
+  }
   catch { return defaults; }
 }
 
@@ -376,15 +382,11 @@ function render() {
   const cloudLabels = { syncing: '載入雲端', saving: '同步中', synced: '已同步', error: '本機暫存', 'local-only': '僅本機' };
   const cloudLabel = cloudLabels[cloudSyncStatus] || '載入雲端';
   app.innerHTML = `<div class="app-shell">
-      <div class="app-main"><header class="topbar"><a class="brand" href="#today" data-navigate="today" aria-label="DAYFLOW 首頁"><span class="brand-mark">D</span><span class="brand-name">DAYFLOW</span></a><nav class="primary-nav" aria-label="主要功能">${[['today','今天'],['calendar','行事曆'],['habits','習慣'],['focus','專注']].map(([id,label]) => `<a href="#${id}" data-navigate="${id}" class="${route === id ? 'is-active' : ''}">${label}</a>`).join('')}</nav><div class="topbar-actions"><button class="button ai-launch-button" data-action="ai-open" aria-label="開啟 DAYFLOW AI 助理" title="以目前功能情境開啟 AI 助理"><span aria-hidden="true">✳</span> AI</button><button class="icon-button topbar-icon" data-action="open-search" aria-label="搜尋待辦" title="搜尋待辦">${icon('search')}</button><button class="button button-primary quick-add-button" data-action="quick-add" aria-label="新增待辦" title="新增待辦">${icon('plus')}<span>新增</span></button><button class="cloud-status cloud-${cloudSyncStatus}" data-action="cloud-enable-sync" ${cloudSyncStatus === 'local-only' || cloudSyncStatus === 'error' ? '' : 'disabled'} title="${cloudSyncStatus === 'local-only' ? '啟用 Firebase 雲端同步' : cloudSyncStatus === 'error' ? '同步暫時失敗，資料仍保存在本機' : `雲端資料${cloudLabel}`}" aria-label="雲端資料狀態：${cloudLabel}"><i></i><span>${cloudLabel}</span></button><span class="auth-account" title="${escapeHTML(authUser.email || authUser.displayName || '')}">${authUser.photoURL ? `<img src="${escapeHTML(authUser.photoURL)}" alt="">` : `<span class="auth-avatar-fallback">${escapeHTML((authUser.displayName || authUser.email || 'G').slice(0,1).toUpperCase())}</span>`}<span class="auth-account-name">${escapeHTML(authUser.displayName || authUser.email || 'Google 帳戶')}</span></span><button class="button auth-sign-out" data-action="google-sign-out">登出</button><button class="icon-button topbar-icon mobile-menu-button" data-action="toggle-drawer" aria-label="開啟選單" aria-expanded="${drawerOpen}" title="選單">${icon('menu')}</button></div></header>
+      <div class="app-main"><header class="topbar"><div class="topbar-inner"><a class="brand" href="#today" data-navigate="today" aria-label="DAYFLOW 首頁"><span class="brand-mark">D</span><span class="brand-name">DAYFLOW</span></a><nav class="primary-nav" aria-label="主要功能">${[['today','今天'],['calendar','行事曆'],['habits','習慣'],['focus','專注']].map(([id,label]) => `<a href="#${id}" data-navigate="${id}" class="${route === id ? 'is-active' : ''}">${label}</a>`).join('')}</nav><div class="topbar-actions"><button class="button ai-launch-button" data-action="ai-open" aria-label="開啟 DAYFLOW AI 助理" title="以目前功能情境開啟 AI 助理"><span aria-hidden="true">✳</span> AI</button><button class="icon-button topbar-icon" data-action="open-search" aria-label="搜尋待辦" title="搜尋待辦">${icon('search')}</button><button class="button button-primary quick-add-button" data-action="quick-add" aria-label="新增待辦" title="新增待辦">${icon('plus')}<span>新增</span></button><button class="cloud-status cloud-${cloudSyncStatus}" data-action="cloud-enable-sync" ${cloudSyncStatus === 'local-only' || cloudSyncStatus === 'error' ? '' : 'disabled'} title="${cloudSyncStatus === 'local-only' ? '啟用 Firebase 雲端同步' : cloudSyncStatus === 'error' ? '同步暫時失敗，資料仍保存在本機' : `雲端資料${cloudLabel}`}" aria-label="雲端資料狀態：${cloudLabel}"><i></i><span>${cloudLabel}</span></button><span class="auth-account" title="${escapeHTML(authUser.email || authUser.displayName || '')}">${authUser.photoURL ? `<img src="${escapeHTML(authUser.photoURL)}" alt="">` : `<span class="auth-avatar-fallback">${escapeHTML((authUser.displayName || authUser.email || 'G').slice(0,1).toUpperCase())}</span>`}<span class="auth-account-name">${escapeHTML(authUser.displayName || authUser.email || 'Google 帳戶')}</span></span><button class="button auth-sign-out" data-action="google-sign-out">登出</button><button class="icon-button topbar-icon mobile-menu-button" data-action="toggle-drawer" aria-label="開啟選單" aria-expanded="${drawerOpen}" title="選單">${icon('menu')}</button></div></div></header>
       <main class="main-content">${renderPage(route, data, context())}</main>
     </div>
     ${drawerOpen ? renderDrawer() : ''}
   </div>`;
-  requestAnimationFrame(() => app.querySelectorAll('.focus-wheel').forEach(wheel => {
-    const selected = wheel.querySelector('[aria-selected="true"]');
-    if (selected) wheel.scrollTop = selected.offsetTop - (wheel.clientHeight - selected.offsetHeight) / 2;
-  }));
 }
 
 function renderDrawer() {
@@ -594,7 +596,7 @@ function persistSetting(name, value) {
 function persistFocusTask(value) { focus.taskId = value; saveFocus(); }
 
 function timerStart() {
-  if (focus.remainingMs <= 0) focus.remainingMs = focus.durations[focus.mode] * 60000;
+  if (focus.remainingMs <= 0) focus.remainingMs = Number(focus.durations[focus.mode] || 25) * 60000;
   focus.endAt = Date.now() + focus.remainingMs;
   focus.started = true;
   focus.running = true;
@@ -644,35 +646,44 @@ function timerFinish() {
     updateData(data => data.focusSessions.push({ id: newId('focus'), date: dateKey(), minutes, taskId: focus.taskId, createdAt: new Date().toISOString(), demo: false }));
     const taskName = getData().tasks.find(item => item.id === focus.taskId)?.title;
     toast(taskName ? `已完成專注：${taskName}` : '專注時段完成');
-    focus.mode = focus.completedCount % 4 === 0 ? 'long' : 'short';
+    focus.mode = 'rest';
   } else { toast('休息結束，準備開始下一段專注', 'info'); focus.mode = 'focus'; }
-  focus.remainingMs = focus.durations[focus.mode] * 60000;
+  focus.remainingMs = Number(focus.durations[focus.mode] || 5) * 60000;
   saveFocus(); render();
 }
 
 function timerTick() {
-  if (!focus.running) return;
-  focus.remainingMs = Math.max(0, focus.endAt - Date.now());
-  const display = `${String(Math.floor(focus.remainingMs / 60000)).padStart(2, '0')}:${String(Math.floor(focus.remainingMs % 60000 / 1000)).padStart(2, '0')}`;
-  const clock = document.getElementById('focus-clock');
-  if (clock) clock.textContent = display;
-  const homeClock = document.getElementById('home-focus-clock');
-  if (homeClock) homeClock.textContent = display;
-  const duration = Number(focus.durations[focus.mode] || 25) * 60000;
-  const progress = Math.max(0, Math.min(100, (1 - focus.remainingMs / duration) * 100));
-  document.querySelector('.focus-ring')?.style.setProperty('--focus-progress', `${progress}%`);
-  document.querySelector('.mini-focus-ring')?.style.setProperty('--focus-progress', `${progress}%`);
-  if (focus.remainingMs <= 0) timerFinish();
+  if (focus.running) {
+    focus.remainingMs = Math.max(0, focus.endAt - Date.now());
+    const display = `${String(Math.floor(focus.remainingMs / 60000)).padStart(2, '0')}:${String(Math.floor(focus.remainingMs % 60000 / 1000)).padStart(2, '0')}`;
+    const clock = document.getElementById('focus-clock');
+    if (clock) clock.textContent = display;
+    const homeClock = document.getElementById('home-focus-clock');
+    if (homeClock) homeClock.textContent = display;
+    const duration = Number(focus.durations[focus.mode] || 25) * 60000;
+    const progress = Math.max(0, Math.min(100, (1 - focus.remainingMs / duration) * 100));
+    document.querySelector('.focus-ring')?.style.setProperty('--focus-progress', `${progress}%`);
+    document.querySelector('.mini-focus-ring')?.style.setProperty('--focus-progress', `${progress}%`);
+  }
+  const eta = document.getElementById('focus-finish-estimate');
+  if (eta) {
+    const finishAt = focus.running ? focus.endAt : Date.now() + Math.max(0, focus.remainingMs);
+    const etaMinute = String(Math.floor(finishAt / 60000));
+    if (eta.dataset.etaMinute !== etaMinute) {
+      const hour24 = getData().settings.hour24 !== false;
+      const finishTime = new Intl.DateTimeFormat('zh-TW', { hour: '2-digit', minute: '2-digit', hourCycle: hour24 ? 'h23' : 'h12' }).format(new Date(finishAt));
+      eta.textContent = focus.running ? `預估 ${finishTime} 完成` : focus.started ? `繼續後約 ${finishTime} 完成` : `現在開始，預估 ${finishTime} 完成`;
+      eta.dataset.etaMinute = etaMinute;
+    }
+  }
+  if (focus.running && focus.remainingMs <= 0) timerFinish();
 }
 
-function setFocusWheel(unit, value) {
+function setFocusDuration(value) {
   if (focus.started || focus.running) return;
-  const current = Number(focus.durations[focus.mode] || 25);
-  const hour = Math.floor(current / 60);
-  const minute = current % 60;
-  let next = unit === 'hours' ? Number(value) * 60 + (Number(value) === 2 ? 0 : minute) : (hour === 2 && Number(value) > 0 ? 60 : hour * 60) + Number(value);
-  const max = focus.mode === 'focus' ? 120 : focus.mode === 'short' ? 60 : 90;
-  next = Math.max(1, Math.min(max, next));
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) { render(); return; }
+  const next = Math.max(1, Math.min(120, Math.round(parsed)));
   focus.durations[focus.mode] = next;
   focus.remainingMs = next * 60000;
   saveFocus(); render();
@@ -739,7 +750,6 @@ async function handleAction(action, element) {
     case 'home-widget-unhide': rememberLayoutUndo(); homeLayout.hidden = homeLayout.hidden.filter(item => item !== id); saveHomeLayout(); dialogRoot.querySelector('dialog')?.close(); render(); showLayoutUndo('已顯示模組'); break;
     case 'home-widget-add': { const type = element.dataset.type; if (WIDGET_REGISTRY[type] && !homeLayout.items.some(item => item.type === type)) { rememberLayoutUndo(); const item = defaultWidget(type); if (activeLayoutDevice() === 'mobile') item.size = 'small'; homeLayout.items.push(item); saveHomeLayout(); dialogRoot.querySelector('dialog')?.close(); homeEditMode = false; render(); showLayoutUndo('已加入首頁模組'); } break; }
     case 'focus-mode': timerChangeMode(element.dataset.mode); break;
-    case 'focus-duration-wheel': setFocusWheel(element.dataset.wheel, element.dataset.value); break;
     case 'focus-start': timerStart(); break;
     case 'focus-pause': timerPause(); break;
     case 'focus-end': timerEnd(); break;
@@ -771,6 +781,7 @@ function handleSubmit(event) {
 function handleChange(event) {
   const target = event.target;
   if (target.matches('[data-task-sort]')) { taskSort = target.value; render(); return; }
+  if (target.matches('[data-focus-duration]')) { setFocusDuration(target.value); return; }
   if (target.matches('[data-setting]')) {
     if (target.dataset.setting === 'focus-task') { persistFocusTask(target.value); return; }
     persistSetting(target.dataset.setting, target.value); return;
@@ -942,26 +953,6 @@ window.addEventListener('pointermove', event => {
 }, { passive: false });
 window.addEventListener('pointerup', event => finishWidgetPointer(event));
 window.addEventListener('pointercancel', event => finishWidgetPointer(event, true));
-
-document.addEventListener('wheel', event => {
-  const wheel = event.target.closest?.('.focus-wheel');
-  if (wheel) userScrolledFocusWheels.add(wheel);
-}, true);
-document.addEventListener('pointerdown', event => {
-  const wheel = event.target.closest?.('.focus-wheel');
-  if (wheel) userScrolledFocusWheels.add(wheel);
-}, true);
-document.addEventListener('scroll', event => {
-  const wheel = event.target.closest?.('.focus-wheel');
-  if (!wheel || !userScrolledFocusWheels.has(wheel) || focus.started || focus.running) return;
-  clearTimeout(focusWheelScrollTimer);
-  focusWheelScrollTimer = setTimeout(() => {
-    userScrolledFocusWheels.delete(wheel);
-    const center = wheel.getBoundingClientRect().top + wheel.clientHeight / 2;
-    const closest = [...wheel.querySelectorAll('[data-value]')].sort((a, b) => Math.abs(a.getBoundingClientRect().top + a.offsetHeight / 2 - center) - Math.abs(b.getBoundingClientRect().top + b.offsetHeight / 2 - center))[0];
-    if (closest) setFocusWheel(wheel.getAttribute('aria-label') === '小時' ? 'hours' : 'minutes', closest.dataset.value);
-  }, 120);
-}, true);
 
 function handleFile(event) {
   const input = event.target.closest('[data-action="import-data"]');
