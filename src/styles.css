@@ -632,11 +632,8 @@ kbd { padding: 2px 5px; border: 1px solid var(--border); border-radius: 4px; bac
   .home-task-heading h1 { font-size: 17px; }
 }
 
-/* Independent responsive widget boards. */
+/* Responsive shared widget board. */
 .home-widget-toolbar { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
-.layout-device-switch { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
-.layout-device-button { min-height: 27px; padding: 4px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: 9px; cursor: pointer; }
-.layout-device-button.is-active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgb(20 25 35 / 9%); }
 .home-widget-tools { flex-wrap: nowrap; }
 .home-widget-tools .icon-button { width: 30px; height: 29px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); }
 .home-widgets { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-flow: row dense; align-items: stretch; gap: 14px; }
@@ -699,13 +696,11 @@ kbd { padding: 2px 5px; border: 1px solid var(--border); border-radius: 4px; bac
   .widget-resize-handle { display: none; }
   .home-widget-toolbar { justify-content: flex-start; gap: 6px; }
   .home-widgets-heading { align-items: flex-start; flex-direction: column; }
-  .layout-device-button { min-width: 54px; min-height: 34px; font-size: 10px; }
   .home-widget-tools .button { min-height: 33px; font-size: 10px; }
   .home-task-card { order: 0; }
 }
 @media (max-width: 390px) {
   .home-widget-card[data-size] { padding-inline: 12px; }
-  .layout-device-button { min-width: 49px; padding-inline: 7px; }
   .home-widget-tools { gap: 4px; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -834,8 +829,6 @@ body { font-size: 15px; line-height: 1.6; }
 .widget-edit-controls .icon-button { width: 31px; height: 31px; }
 .home-edit-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .add-widget-button { margin: 0; }
-.layout-device-switch { border: 0; background: transparent; }
-.layout-device-button { min-height: 31px; font-size: 11px; }
 .widget-resize-handle { width: 30px; height: 30px; opacity: .45; }
 .home-widget-card.is-editable { outline: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
 .calendar-page-layout { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(280px, .8fr); align-items: start; gap: 17px; }
@@ -986,7 +979,6 @@ body { font-size: 15px; line-height: 1.6; }
   .home-widgets-section { gap: 10px; }
   .home-widgets-heading { align-items: flex-start; flex-direction: column; }
   .home-widget-toolbar { width: 100%; justify-content: space-between; gap: 4px; }
-  .layout-device-button { min-width: 45px; padding-inline: 7px; font-size: 10px; }
   .home-widget-tools .button { min-height: 32px; padding-inline: 9px; font-size: 11px; }
   .home-widgets[data-layout-device] { grid-template-columns: minmax(0, 1fr); gap: 9px; }
   .home-widget-card[data-size] { grid-column: 1 / -1; min-height: 0; padding: 15px; border-radius: 14px; }
@@ -1101,3 +1093,21 @@ body { font-size: 15px; line-height: 1.6; }
 .home-widget-card[data-widget-type="focusTimer"] .mini-focus-ring::before { inset: 7px; width: auto; height: auto; }
 .home-widget-card[data-widget-type="focusTimer"] .mini-focus-ring strong { font-size: clamp(15px, 1.6vw, 19px); }
 .home-widget-card[data-widget-type="focusTimer"] .home-widget-content > .button-small { justify-self: center; }
+
+.home-task-date-heading { min-width: 0; }
+.home-task-date-line { display: flex; align-items: center; gap: 5px; }
+.home-task-date-controls { display: inline-flex; align-items: center; gap: 0; }
+.home-task-date-controls button { display: grid; width: 25px; height: 27px; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted); opacity: .58; cursor: pointer; transition: background .16s, color .16s, opacity .16s; }
+.home-task-date-controls button:hover, .home-task-date-controls button:focus-visible { background: var(--surface-subtle); color: var(--ink); opacity: 1; }
+.home-task-date-controls .icon { width: 15px; height: 15px; }
+.home-widget-card-heading { align-items: center; }
+.home-widget-title { min-width: 0; }
+.home-widget-heading-actions, .widget-edit-controls { display: flex; align-items: center; gap: 3px; }
+.widget-heading-link { display: grid; width: 26px; height: 26px; flex: 0 0 auto; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--faint); cursor: pointer; }
+.widget-heading-link:hover, .widget-heading-link:focus-visible { background: var(--surface-subtle); color: var(--ink); }
+.widget-heading-link .icon { width: 15px; height: 15px; }
+.widget-task-copy { display: grid; min-width: 0; flex: 1; gap: 2px; text-align: left; }
+.widget-task-date { color: var(--muted); font-size: 9px; line-height: 1.2; }
+.widget-task-title { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; }
+.widget-task:hover .widget-task-title { color: var(--accent); }
+.settings-section .settings-actions .button { text-decoration: none; }

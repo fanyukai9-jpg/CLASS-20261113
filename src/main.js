@@ -1,8 +1,8 @@
 import { addDays, dateKey, formatDate, formatTime, parseDate, parseQuickDate } from './dates.js';
 import { activateUserScope, createTask, exportData, getData, getUIState, importData, newId, updateData, updateUI } from './data.js';
 import { icon, renderTaskForm } from './components.js';
-import { renderPage } from './pages.js';
-import { createHomeLayouts, defaultHomeLayouts, defaultWidget, renderWidgetPicker, WIDGET_REGISTRY } from './widgets.js';
+import { renderPage } from './pages.js?v=dayflow-home-2';
+import { createHomeLayout, createHomeLayouts, defaultHomeLayouts, defaultWidget, renderWidgetPicker, WIDGET_REGISTRY } from './widgets.js?v=dayflow-home-2';
 import { confirmDialog, escapeHTML, openDialog, toast } from './ui.js';
 import { askDayflowAI, buildAIContext, getAIStatus, validateAIAction } from './ai.js?v=dayflow-ai-add-1';
 
@@ -43,9 +43,8 @@ let homeCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth()
 let drawerOpen = false;
 let homeEditMode = false;
 let homeTransitionDirection = 0;
-let layoutPreviewDevice = null;
-let homeLayouts = loadHomeLayouts();
-let homeLayout = homeLayouts[activeLayoutDevice()];
+let renderedLayoutDevice = detectLayoutDevice();
+let homeLayout = loadHomeLayout();
 let aiMessages = loadAIMessages();
 let aiPanelContext = { route: 'global', taskId: '', habitId: '' };
 let aiBusy = false;
@@ -55,44 +54,50 @@ function detectLayoutDevice() {
   return matchMedia('(max-width: 700px)').matches ? 'mobile' : matchMedia('(max-width: 1023px)').matches ? 'tablet' : 'desktop';
 }
 
-function activeLayoutDevice() {
-  return layoutPreviewDevice || detectLayoutDevice();
+function layoutCustomizationScore(layout, baseline) {
+  let score = Math.abs(layout.items.length - baseline.items.length) * 10;
+  if (layout.items.map(item => item.type).join('|') !== baseline.items.map(item => item.type).join('|')) score += 10;
+  if ([...layout.hidden].sort().join('|') !== [...baseline.hidden].sort().join('|')) score += 5;
+  if (layout.locked !== baseline.locked) score += 1;
+  for (const item of layout.items) {
+    const original = baseline.items.find(entry => entry.type === item.type);
+    if (!original) { score += 3; continue; }
+    if (item.size !== original.size) score += 1;
+    if (item.name !== original.name) score += 1;
+  }
+  return score;
 }
 
-function loadHomeLayouts() {
+function loadHomeLayout() {
   try {
-    const saved = localStorage.getItem(appStorageKey('dayflow.home-layout.v3')) || localStorage.getItem(appStorageKey('dayflow.home-layout.v2')) || localStorage.getItem(appStorageKey('dayflow.home-layout.v1'));
-    return createHomeLayouts(saved ? JSON.parse(saved) : {});
-  } catch { return defaultHomeLayouts(); }
+    const saved = localStorage.getItem(appStorageKey('dayflow.home-layout.v4')) || localStorage.getItem(appStorageKey('dayflow.home-layout.v3')) || localStorage.getItem(appStorageKey('dayflow.home-layout.v2')) || localStorage.getItem(appStorageKey('dayflow.home-layout.v1'));
+    if (!saved) return createHomeLayout();
+    const value = JSON.parse(saved);
+    if (Array.isArray(value?.items)) return createHomeLayout(value);
+    const legacy = createHomeLayouts(value);
+    const defaults = defaultHomeLayouts();
+    const device = ['desktop', 'tablet', 'mobile'].sort((a, b) => layoutCustomizationScore(legacy[b], defaults[b]) - layoutCustomizationScore(legacy[a], defaults[a]))[0];
+    return createHomeLayout(legacy[device]);
+  } catch { return createHomeLayout(); }
 }
 
 function saveHomeLayout() {
   try {
-    homeLayouts[activeLayoutDevice()] = homeLayout;
-    localStorage.setItem(appStorageKey('dayflow.home-layout.v3'), JSON.stringify({ layouts: homeLayouts }));
+    localStorage.setItem(appStorageKey('dayflow.home-layout.v4'), JSON.stringify(homeLayout));
   } catch { /* The home arrangement is optional. */ }
 }
 
 function rememberLayoutUndo() {
-  layoutUndo = { device: activeLayoutDevice(), layout: JSON.parse(JSON.stringify(homeLayout)) };
+  layoutUndo = JSON.parse(JSON.stringify(homeLayout));
 }
 
 function showLayoutUndo(message) {
   const snapshot = layoutUndo;
   if (!snapshot) { toast(message); return; }
   toast(message, 'success', { label: '復原', run: () => {
-    homeLayouts[snapshot.device] = snapshot.layout;
-    if (activeLayoutDevice() === snapshot.device) homeLayout = homeLayouts[snapshot.device];
+    homeLayout = snapshot;
     saveHomeLayout(); render();
   } });
-}
-
-function setLayoutDevice(device) {
-  if (!homeLayouts[device]) return;
-  layoutPreviewDevice = device === detectLayoutDevice() ? null : device;
-  homeLayout = homeLayouts[device];
-  homeEditMode = false;
-  render();
 }
 
 function loadFocus() {
@@ -359,7 +364,7 @@ async function applyAIProposal(messageIndex) {
 
 function context() {
   if (focus.running) focus.remainingMs = Math.max(0, focus.endAt - Date.now());
-  return { taskSort, taskStatusFilter, calendarDate, query, focus, homeDate, homeCalendarMonth, homeLayout, homeEditMode, homeTransitionDirection, layoutDevice: activeLayoutDevice() };
+  return { taskSort, taskStatusFilter, calendarDate, query, focus, homeDate, homeCalendarMonth, homeLayout, homeEditMode, homeTransitionDirection, layoutDevice: detectLayoutDevice() };
 }
 
 function renderAuthGate() {
@@ -755,27 +760,26 @@ async function handleAction(action, element) {
     case 'toggle-habit': toggleHabit(id); break;
     case 'calendar-today': calendarDate = dateKey(); render(); break;
     case 'calendar-shift': { const current = parseDate(calendarDate); current.setDate(1); current.setMonth(current.getMonth() + Number(element.dataset.step)); calendarDate = dateKey(current); render(); break; }
-    case 'calendar-add': openQuickAdd({ dueDate: element.dataset.date }); break;
+    case 'calendar-add': openQuickAdd({ dueDate: element.dataset.date, showDetails: true }); break;
     case 'home-date-today': homeDate = dateKey(); homeCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12); render(); break;
     case 'home-date-select': homeDate = element.dataset.date; { const selected = parseDate(homeDate); homeCalendarMonth = new Date(selected.getFullYear(), selected.getMonth(), 1, 12); } render(); break;
     case 'home-month-shift': { const next = new Date(homeCalendarMonth); next.setDate(1); next.setMonth(next.getMonth() + Number(element.dataset.step)); homeCalendarMonth = next; render(); break; }
-    case 'home-layout-device': setLayoutDevice(element.dataset.device); break;
+    case 'home-date-shift': shiftHomeDate(Number(element.dataset.step)); break;
     case 'home-layout-reset': {
-      const device = activeLayoutDevice();
       rememberLayoutUndo();
-      homeLayouts[device] = defaultHomeLayouts()[device]; homeLayout = homeLayouts[device];
-      saveHomeLayout(); render(); showLayoutUndo('已重置目前裝置版面'); break;
+      homeLayout = createHomeLayout();
+      saveHomeLayout(); render(); showLayoutUndo('已重置首頁版面'); break;
     }
     case 'home-widget-edit': if (homeLayout.locked) { toast('首頁配置已鎖定，請先解除鎖定'); break; } homeEditMode = !homeEditMode; render(); break;
     case 'home-widget-lock': homeLayout.locked = !homeLayout.locked; if (homeLayout.locked) homeEditMode = false; saveHomeLayout(); render(); break;
     case 'home-widget-picker': openWidgetPicker(); break;
     case 'home-widget-settings':
     case 'home-widget-open-settings': openWidgetSettings(id); break;
-    case 'home-widget-size': if (activeLayoutDevice() === 'mobile') openWidgetSizePicker(id); else { const sizes = ['small','medium','large','full']; const item = homeLayout.items.find(entry => entry.id === id); if (item) { rememberLayoutUndo(); item.size = sizes[(sizes.indexOf(item.size) + 1) % sizes.length]; saveHomeLayout(); render(); showLayoutUndo('小工具尺寸已更新'); } } break;
+    case 'home-widget-size': if (detectLayoutDevice() === 'mobile') openWidgetSizePicker(id); else { const sizes = ['small','medium','large','full']; const item = homeLayout.items.find(entry => entry.id === id); if (item) { rememberLayoutUndo(); item.size = sizes[(sizes.indexOf(item.size) + 1) % sizes.length]; saveHomeLayout(); render(); showLayoutUndo('小工具尺寸已更新'); } } break;
     case 'home-widget-size-set': { const item = homeLayout.items.find(entry => entry.id === id); if (item) { rememberLayoutUndo(); item.size = element.dataset.size; } saveHomeLayout(); dialogRoot.querySelector('dialog')?.close(); render(); showLayoutUndo('小工具尺寸已更新'); break; }
     case 'home-widget-hide': rememberLayoutUndo(); homeLayout.hidden = [...new Set([...homeLayout.hidden, id])]; saveHomeLayout(); render(); showLayoutUndo('已隱藏模組'); break;
     case 'home-widget-unhide': rememberLayoutUndo(); homeLayout.hidden = homeLayout.hidden.filter(item => item !== id); saveHomeLayout(); dialogRoot.querySelector('dialog')?.close(); render(); showLayoutUndo('已顯示模組'); break;
-    case 'home-widget-add': { const type = element.dataset.type; if (WIDGET_REGISTRY[type] && !homeLayout.items.some(item => item.type === type)) { rememberLayoutUndo(); const item = defaultWidget(type); if (activeLayoutDevice() === 'mobile') item.size = 'small'; homeLayout.items.push(item); saveHomeLayout(); dialogRoot.querySelector('dialog')?.close(); homeEditMode = false; render(); showLayoutUndo('已加入首頁模組'); } break; }
+    case 'home-widget-add': { const type = element.dataset.type; if (WIDGET_REGISTRY[type] && !homeLayout.items.some(item => item.type === type)) { rememberLayoutUndo(); homeLayout.items.push(defaultWidget(type)); saveHomeLayout(); dialogRoot.querySelector('dialog[open]')?.close(); homeEditMode = false; render(); showLayoutUndo('已加入首頁模組'); } break; }
     case 'focus-mode': timerChangeMode(element.dataset.mode); break;
     case 'focus-start': timerStart(); break;
     case 'focus-pause': timerPause(); break;
@@ -835,13 +839,13 @@ function handleClick(event) {
 app.addEventListener('pointerdown', event => {
   const handle = event.target.closest('[data-widget-resize]');
   if (handle) {
-    if (homeLayout.locked || activeLayoutDevice() === 'mobile') return;
+    if (homeLayout.locked || detectLayoutDevice() === 'mobile') return;
     const card = handle.closest('.home-widget-card');
     const item = homeLayout.items.find(entry => entry.id === handle.dataset.id);
     if (!card || !item) return;
     event.preventDefault(); event.stopPropagation();
     rememberLayoutUndo();
-    widgetResizeStart = { id: item.id, pointerId: event.pointerId, card, startX: event.clientX, startWidth: card.getBoundingClientRect().width, originalSize: item.size, device: activeLayoutDevice() };
+    widgetResizeStart = { id: item.id, pointerId: event.pointerId, card, startX: event.clientX, startWidth: card.getBoundingClientRect().width, originalSize: item.size };
     if (event.isTrusted) handle.setPointerCapture?.(event.pointerId);
     card.classList.add('is-resizing');
     return;
@@ -879,7 +883,7 @@ function beginWidgetDrag(x, y) {
   document.body.append(preview);
   grid.classList.add('is-reordering');
   document.body.classList.add('widget-drag-active');
-  widgetDragSession = { id: card.dataset.widget, card, grid, placeholder, preview, startX: x, startY: y, dx: 0, dy: 0, device: activeLayoutDevice() };
+  widgetDragSession = { id: card.dataset.widget, card, grid, placeholder, preview, startX: x, startY: y, dx: 0, dy: 0 };
 }
 
 function handleWidgetPointerMove(event) {
@@ -971,7 +975,7 @@ window.addEventListener('pointermove', event => {
     const item = homeLayout.items.find(entry => entry.id === widgetResizeStart.id);
     const gridWidth = widgetResizeStart.card.closest('.home-widgets')?.getBoundingClientRect().width || widgetResizeStart.startWidth;
     const ratio = Math.max(.18, Math.min(1, (widgetResizeStart.startWidth + event.clientX - widgetResizeStart.startX) / gridWidth));
-    const candidates = activeLayoutDevice() === 'tablet' ? [['small', .25], ['medium', .5], ['large', .75], ['full', 1]] : [['small', .25], ['medium', 1/3], ['large', .5], ['full', 1]];
+    const candidates = detectLayoutDevice() === 'tablet' ? [['small', .25], ['medium', .5], ['large', .75], ['full', 1]] : [['small', .25], ['medium', 1/3], ['large', .5], ['full', 1]];
     const size = candidates.reduce((best, value) => Math.abs(value[1] - ratio) < Math.abs(best[1] - ratio) ? value : best)[0];
     if (item) { item.size = size; widgetResizeStart.card.dataset.size = size; widgetResizeStart.card.classList.remove('size-small','size-medium','size-large','size-full'); widgetResizeStart.card.classList.add(`size-${size}`); }
     return;
@@ -1093,11 +1097,10 @@ window.addEventListener('hashchange', () => {
 });
 let layoutResizeTimer = 0;
 window.addEventListener('resize', () => {
-  if (layoutPreviewDevice) return;
   clearTimeout(layoutResizeTimer);
   layoutResizeTimer = window.setTimeout(() => {
-    const device = activeLayoutDevice();
-    if (homeLayout !== homeLayouts[device]) { homeLayout = homeLayouts[device]; homeEditMode = false; render(); }
+    const device = detectLayoutDevice();
+    if (device !== renderedLayoutDevice) { renderedLayoutDevice = device; render(); }
   }, 120);
 }, { passive: true });
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (getData().settings.theme === 'system') render(); });
@@ -1133,8 +1136,8 @@ async function initializeAuthentication() {
 
       activateUserScope(user.uid);
       focus = loadFocus();
-      homeLayouts = loadHomeLayouts();
-      homeLayout = homeLayouts[activeLayoutDevice()];
+      renderedLayoutDevice = detectLayoutDevice();
+      homeLayout = loadHomeLayout();
       homeEditMode = false;
       cloudSyncStatus = 'syncing';
       render();
