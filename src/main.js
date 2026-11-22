@@ -833,7 +833,7 @@ function handleChange(event) {
 
 document.addEventListener('focusin', event => {
   if (!event.target.matches('[data-focus-duration]') || focus.started || focus.running) return;
-  focusDurationDraft = event.target.value || String(focus.durations[focus.mode]);
+  focusDurationDraft = '';
   focusKeypadOpen = true; render();
 });
 
