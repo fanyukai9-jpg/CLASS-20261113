@@ -1,43 +1,45 @@
 # DAYFLOW
 
-DAYFLOW 是一套以繁體中文呈現的個人任務與生活管理網站。它採用原生 HTML、CSS 與 JavaScript Modules，不需要安裝套件或建置步驟，可直接由 GitHub Pages 發布。
+DAYFLOW 是以繁體中文呈現的個人待辦事項工具，提供今日待辦、月曆與近期安排、習慣追蹤及專注計時。網站採用原生 HTML、CSS 與 JavaScript Modules，可直接透過靜態伺服器執行。
 
 ## 本機啟動
 
 在專案根目錄啟動靜態伺服器：
 
-```powershell
-python -m http.server 4173
+```sh
+python3 -m http.server 4173
 ```
 
-接著開啟 <http://127.0.0.1:4173/>。以 HTTP 伺服器開啟可確保 JavaScript Modules 正常載入。
+接著開啟 <http://localhost:4173/>。Firebase 登入使用 `localhost`，不要改用 `127.0.0.1`，除非已在 Firebase Authentication 的授權網域中加入該 IP。
 
 ## 功能
 
-- 首頁預設顯示今天的待辦事項；時間與不可點選日期的迷你月曆整合於同一張卡片，可左右滑動或使用桌面方向鍵切換日期。
-- 首頁小工具以響應式卡片排列，可在編輯模式調整順序與大小、隱藏／重新加入卡片，並鎖定配置。
-- 今天、收集箱、即將到來、月／週／日行事曆、專案清單與看板、習慣、專注計時、統計和設定
-- 任務新增、編輯、刪除、完成／復原、複製、子任務、優先級、標籤、重複週期、篩選、搜尋與批次操作
-- 專案與習慣管理、行事曆拖放改期、專案看板拖放狀態
-- 番茄鐘以結束時間計算剩餘時間；背景分頁或休眠後會校正
-- 初次使用會載入範例資料；可清除範例、重新載入範例、匯入或匯出 JSON
-- 支援淺色／深色／跟隨系統、強調色、介面密度、一週起始日與 12／24 小時制
-- `Q` 開啟快速新增；`Ctrl/⌘ + K` 搜尋；`Ctrl/⌘ + Enter` 送出表單；`Esc` 關閉對話框
+- 今日待辦支援新增、編輯、刪除、完成／復原、日期、時間、優先程度、備註、狀態篩選及排序。
+- 月曆與接下來整合在同一頁，可切換月份、查看待辦並從日期直接新增。
+- 習慣可自訂名稱、每日或每週頻率，並保留打卡、連續紀錄及完成率。
+- 專注計時支援自訂時長、開始、暫停、繼續、結束及專注紀錄。
+- 首頁時間與迷你月曆整合顯示；首頁摘要模組可新增、移動、調整大小、隱藏、重新命名及還原預設布局。手機、平板與桌機使用獨立布局。
+- 支援搜尋、淺色／深色顯示、時間格式偏好，以及 JSON 匯入／匯出。
+- DAYFLOW AI 共用待辦、行事曆、習慣與專注情境；可提供自然語言整理、排程與目標建議，寫入資料前會先驗證並提供勾選預覽與確認。
 
-## 資料儲存
+## DAYFLOW AI 與 App Check
 
-任務、專案、習慣、設定與專注紀錄保存在目前瀏覽器的 LocalStorage。資料不會自動同步到其他裝置或瀏覽器。清除網站資料前，請先從「設定」匯出 JSON 備份。
+Firebase AI Logic 已在 Firebase 專案 `class-20261016` 的 Web App 啟用，並以 Gemini Developer API 的 `gemini-3.8-flash` 產生 JSON 結果。前端不放 Gemini API Key；`src/runtime-config.js` 的 reCAPTCHA Enterprise Site Key 是公開的網站金鑰，並限制於 Firebase Hosting 網域 `class-20261016.web.app`。App Check provider 已在 Firebase 註冊。
 
-快速新增可解析「今天」、「明天」、「後天」、「週五」、「每週一」、「每天」以及常見的上午／下午時間寫法。未辨識的文字會保留為任務名稱，日期不會自行猜測。
+DAYFLOW 每個瀏覽器最多送出 5 次 AI 請求／分鐘；Firebase 專案或模型本身也可能有較低的配額，或暫時無法服務。
 
-## GitHub Pages 發布
+如果要在本機執行真實 AI 呼叫，請在 `src/runtime-config.js` 將 `appCheckDebug` 設為 `true`，載入網站後從瀏覽器 console 複製 Firebase 顯示的一次性 App Check debug token，並在 Firebase Console 的 App Check → Apps → 管理 debug tokens 註冊。Debug token 具有略過 App Check 驗證的權限，只用於私人本機測試；不要提交 token 到版本控制，也不要用於正式部署。正式網站使用已設定的 reCAPTCHA Enterprise provider。
 
-在 GitHub 儲存庫開啟 **Settings → Pages**，將來源設為 `Deploy from a branch`，選擇 `main` 分支與 `/(root)` 資料夾並儲存。之後推送到 `main` 即會更新網站。
+目前 App Check enforcement 尚未開啟。正式發布前先部署更新版並觀察 AI Logic 的 App Check 指標，再啟用 enforcement，避免尚未更新的用戶突然失去服務。Firebase Authentication 只允許已列入授權網域的來源；本機登入請使用 `localhost`，若看到未授權網域訊息，需在 Firebase Authentication → Settings → Authorized domains 加入實際使用的主機名稱。
 
-## 目前限制
+每次 AI 呼叫只帶入當前功能的必要摘要：近期最多 24 項待辦、最多 12 個習慣及近 7 天最多 10 筆專注紀錄；習慣紀錄限制於近 14 或 28 天。AI 對話存在目前瀏覽器，不上傳 Firestore。任務與習慣變更會先顯示操作預覽、經欄位與衝突檢查，再由使用者確認套用。
 
-- 資料只存在本機瀏覽器，沒有帳號、雲端同步或跨裝置備份。
-- 快速新增只辨識 README 列出的簡單日期與時間格式；不支援任意自然語言。
-- 拖曳排序只適用同一日期的清單任務；日曆拖曳調整截止日，專案看板拖曳變更任務狀態。
-- 統計圖表以原生 CSS 與實際本機資料繪製，沒有使用 Recharts 或第三方圖表套件。
-- 瀏覽器通知與外部提醒尚未實作。
+## 資料
+
+待辦、習慣、專注紀錄、設定及 AI 對話保存在瀏覽器 LocalStorage。若使用 Google 帳戶登入並啟用同步，DAYFLOW 資料也會保存在 Firebase Firestore；AI 對話只保存在此裝置。匯入前建議先匯出 JSON 備份。
+
+從舊版 DAYFLOW 載入的任務、習慣與專注紀錄會保留。舊版清單或專案欄位留在相容資料中，不會出現在目前的操作介面。
+
+## GitHub Pages
+
+在 GitHub 儲存庫開啟 **Settings → Pages**，將來源設為 `Deploy from a branch`，選擇 `main` 分支與 `/(root)` 資料夾並儲存。

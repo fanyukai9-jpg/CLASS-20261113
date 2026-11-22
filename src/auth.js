@@ -1,4 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-app.js';
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-app-check.js';
 import {
   GoogleAuthProvider,
   getAuth,
@@ -17,6 +18,25 @@ const firebaseConfig = {
 };
 
 export const firebaseApp = initializeApp(firebaseConfig);
+const appCheckConfig = window.DAYFLOW_CONFIG || {};
+const appCheckSiteKey = String(appCheckConfig.appCheckSiteKey || '').trim();
+const isLocalHost = ['localhost', '127.0.0.1'].includes(location.hostname);
+export const appCheckDebugEnabled = isLocalHost && appCheckConfig.appCheckDebug === true;
+if (appCheckDebugEnabled && appCheckSiteKey) {
+  self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+}
+export let appCheckReady = false;
+if (appCheckSiteKey) {
+  try {
+    initializeAppCheck(firebaseApp, {
+      provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
+      isTokenAutoRefreshEnabled: true,
+    });
+    appCheckReady = true;
+  } catch (error) {
+    console.error('DAYFLOW Firebase App Check 初始化失敗，AI 功能暫停。', error);
+  }
+}
 export const auth = getAuth(firebaseApp);
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
