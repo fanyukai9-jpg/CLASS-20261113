@@ -894,8 +894,12 @@ function scheduleSearchResults() {
 
 function handleClick(event) {
   const link = event.target.closest('[data-navigate]');
-  if (link) { event.preventDefault(); dialogRoot.querySelector('dialog')?.close(); setRoute(link.dataset.navigate); return; }
   const actionElement = event.target.closest('[data-action]');
+  if (accountMenuOpen && !event.target.closest('.account-menu')) {
+    accountMenuOpen = false;
+    render();
+  }
+  if (link) { event.preventDefault(); dialogRoot.querySelector('dialog')?.close(); setRoute(link.dataset.navigate); return; }
   if (actionElement?.matches('[data-widget-resize]') && Date.now() < suppressWidgetResizeClickUntil) return;
   if (actionElement) handleAction(actionElement.dataset.action, actionElement);
 }
@@ -1100,7 +1104,7 @@ function handleDrop(event) {
 }
 
 function handleKeydown(event) {
-  if (event.key === 'Escape') { if (drawerOpen) { drawerOpen = false; render(); return; } document.querySelector('dialog[open]')?.close(); return; }
+  if (event.key === 'Escape') { if (accountMenuOpen) { accountMenuOpen = false; render(); return; } if (drawerOpen) { drawerOpen = false; render(); return; } document.querySelector('dialog[open]')?.close(); return; }
   if (event.target instanceof Element && event.target.matches('[data-widget-resize]') && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) {
     event.preventDefault();
     const item = homeLayout.items.find(entry => entry.id === event.target.closest('.home-widget-card')?.dataset.widget);
