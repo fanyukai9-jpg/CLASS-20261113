@@ -399,9 +399,17 @@ kbd { padding: 2px 5px; border: 1px solid var(--border); border-radius: 4px; bac
 .auth-account img, .auth-avatar-fallback { width: 28px; height: 28px; flex: 0 0 auto; border-radius: 50%; }
 .auth-account img { object-fit: cover; }
 .auth-avatar-fallback { display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 700; }
-.account-menu-popover { position: absolute; z-index: 20; top: calc(100% + 8px); right: 0; min-width: 112px; padding: 5px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-pop); }
-.account-menu-sign-out { width: 100%; padding: 8px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
-.account-menu-sign-out:hover { background: var(--surface-subtle); }
+.account-menu-popover { position: absolute; z-index: 20; top: calc(100% + 8px); right: 0; width: 184px; padding: 7px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-pop); }
+.account-menu-status { display: flex; align-items: center; gap: 8px; padding: 8px 9px 10px; color: var(--muted); font-size: 11px; }
+.cloud-status-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--faint); }
+.cloud-status-dot.cloud-synced { background: var(--green); }
+.cloud-status-dot.cloud-saving, .cloud-status-dot.cloud-syncing { background: var(--orange); }
+.cloud-status-dot.cloud-error { background: var(--red); }
+.account-menu-option, .account-menu-sign-out { display: flex; width: 100%; align-items: center; justify-content: space-between; padding: 8px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.account-menu-option:hover, .account-menu-sign-out:hover { background: var(--surface-subtle); }
+.account-menu-option.is-selected { color: var(--accent); font-weight: 650; }
+.account-menu-option span { font-size: 12px; }
+.account-menu-divider { height: 1px; margin: 5px 2px; background: var(--border); }
 .cloud-status { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 10px; white-space: nowrap; }
 .cloud-status:disabled { cursor: default; opacity: 1; }
 .cloud-status:not(:disabled) { cursor: pointer; }

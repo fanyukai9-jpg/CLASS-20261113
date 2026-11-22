@@ -17,6 +17,7 @@ let authLoadError = false;
 let cloudClient = null;
 let cloudSyncStatus = 'syncing';
 const appStorageKey = key => authUser?.uid ? `${key}.user.${authUser.uid}` : key;
+const cloudModeKey = uid => `dayflow.cloud-mode.${uid}`;
 const validRoutes = new Set(['today', 'calendar', 'habits', 'focus', 'settings', 'search']);
 let focus = loadFocus();
 let route = location.hash.replace(/^#\/?/, '').split('?')[0] || getUIState().route || 'today';
@@ -397,6 +398,7 @@ async function enableCloudDataForCurrentUser() {
   if (!authUser || !cloudClient) return;
   const uid = authUser.uid;
   if (!await confirmCloudDataUpload()) {
+    localStorage.setItem(cloudModeKey(uid), 'local');
     cloudSyncStatus = 'local-only';
     render();
     return;
@@ -410,14 +412,49 @@ async function enableCloudDataForCurrentUser() {
   }
 }
 
+async function setCloudMode(mode) {
+  if (!authUser || !['local', 'online'].includes(mode)) return;
+  const uid = authUser.uid;
+  accountMenuOpen = false;
+  if (mode === 'local') {
+    localStorage.setItem(cloudModeKey(uid), 'local');
+    cloudClient?.stopCloudSync();
+    cloudSyncStatus = 'local-only';
+    render();
+    toast('已切換為本機模式');
+    return;
+  }
+  if (cloudSyncStatus === 'local-only' && !await confirmDialog('切回線上模式時，若帳號已有雲端資料，會載入雲端資料並取代目前的本機資料。請先確認本機資料已同步或備份。要繼續嗎？', '切換至線上')) {
+    render();
+    return;
+  }
+  localStorage.setItem(cloudModeKey(uid), 'online');
+  cloudSyncStatus = 'syncing';
+  render();
+  try {
+    cloudClient ||= await import('./cloud-store.js');
+    const result = await cloudClient.startCloudSync(uid, status => {
+      if (authUser?.uid !== uid) return;
+      cloudSyncStatus = status;
+      render();
+    });
+    if (result?.needsInitialUpload && authUser?.uid === uid) await enableCloudDataForCurrentUser();
+  } catch (error) {
+    console.error('DAYFLOW Firestore 啟動失敗。', error);
+    if (authUser?.uid === uid) { cloudSyncStatus = 'error'; render(); }
+  }
+}
+
 function render() {
   if (!authReady || !authUser) { renderAuthGate(); return; }
   const data = getData();
   applyPreferences(data.settings);
-  const cloudLabels = { syncing: '載入雲端', saving: '同步中', synced: '已同步', error: '本機暫存', 'local-only': '僅本機' };
+  const cloudLabels = { syncing: '連線中', saving: '同步中', synced: '線上同步', error: '同步錯誤', 'local-only': '本機模式' };
   const cloudLabel = cloudLabels[cloudSyncStatus] || '載入雲端';
+  const onlineMode = localStorage.getItem(cloudModeKey(authUser.uid)) !== 'local';
+  const accountMenu = accountMenuOpen ? `<div class="account-menu-popover"><div class="account-menu-status"><span class="cloud-status-dot cloud-${cloudSyncStatus}"></span><span>${cloudLabel}</span></div><button class="account-menu-option ${onlineMode ? 'is-selected' : ''}" data-action="cloud-mode" data-mode="online">線上同步${onlineMode ? '<span>✓</span>' : ''}</button><button class="account-menu-option ${onlineMode ? '' : 'is-selected'}" data-action="cloud-mode" data-mode="local">僅使用本機${onlineMode ? '' : '<span>✓</span>'}</button><div class="account-menu-divider"></div><button class="account-menu-sign-out" data-action="google-sign-out">登出</button></div>` : '';
   app.innerHTML = `<div class="app-shell">
-      <div class="app-main"><header class="topbar"><div class="topbar-inner"><a class="brand" href="#today" data-navigate="today" aria-label="DAYFLOW 首頁"><span class="brand-mark">D</span><span class="brand-name">DAYFLOW</span></a><nav class="primary-nav" aria-label="主要功能">${[['today','今天'],['calendar','行事曆'],['habits','習慣'],['focus','專注']].map(([id,label]) => `<a href="#${id}" data-navigate="${id}" class="${route === id ? 'is-active' : ''}">${label}</a>`).join('')}</nav><div class="topbar-actions"><button class="button ai-launch-button" data-action="ai-open" aria-label="開啟 DAYFLOW AI 助理" title="以目前功能情境開啟 AI 助理"><span aria-hidden="true">✳</span> AI</button><button class="icon-button topbar-icon" data-action="open-search" aria-label="搜尋待辦" title="搜尋待辦">${icon('search')}</button><button class="button button-primary quick-add-button" data-action="quick-add" aria-label="新增待辦" title="新增待辦">${icon('plus')}<span>新增</span></button><button class="cloud-status cloud-${cloudSyncStatus}" data-action="cloud-enable-sync" ${cloudSyncStatus === 'local-only' || cloudSyncStatus === 'error' ? '' : 'disabled'} title="${cloudSyncStatus === 'local-only' ? '啟用 Firebase 雲端同步' : cloudSyncStatus === 'error' ? '同步暫時失敗，資料仍保存在本機' : `雲端資料${cloudLabel}`}" aria-label="雲端資料狀態：${cloudLabel}"><i></i><span>${cloudLabel}</span></button><div class="account-menu ${accountMenuOpen ? 'is-open' : ''}"><button class="auth-account" type="button" data-action="toggle-account-menu" aria-label="帳戶選單" aria-expanded="${accountMenuOpen}" title="帳戶選單">${authUser.photoURL ? `<img src="${escapeHTML(authUser.photoURL)}" alt="">` : `<span class="auth-avatar-fallback">${escapeHTML((authUser.displayName || authUser.email || 'G').slice(0,1).toUpperCase())}</span>`}</button>${accountMenuOpen ? '<div class="account-menu-popover"><button class="account-menu-sign-out" data-action="google-sign-out">登出</button></div>' : ''}</div><button class="icon-button topbar-icon mobile-menu-button" data-action="toggle-drawer" aria-label="開啟選單" aria-expanded="${drawerOpen}" title="選單">${icon('menu')}</button></div></div></header>
+      <div class="app-main"><header class="topbar"><div class="topbar-inner"><a class="brand" href="#today" data-navigate="today" aria-label="DAYFLOW 首頁"><span class="brand-mark">D</span><span class="brand-name">DAYFLOW</span></a><nav class="primary-nav" aria-label="主要功能">${[['today','今天'],['calendar','行事曆'],['habits','習慣'],['focus','專注']].map(([id,label]) => `<a href="#${id}" data-navigate="${id}" class="${route === id ? 'is-active' : ''}">${label}</a>`).join('')}</nav><div class="topbar-actions"><button class="button ai-launch-button" data-action="ai-open" aria-label="開啟 DAYFLOW AI 助理" title="以目前功能情境開啟 AI 助理"><span aria-hidden="true">✳</span> AI</button><button class="icon-button topbar-icon" data-action="open-search" aria-label="搜尋待辦" title="搜尋待辦">${icon('search')}</button><button class="button button-primary quick-add-button" data-action="quick-add" aria-label="新增待辦" title="新增待辦">${icon('plus')}<span>新增</span></button><div class="account-menu ${accountMenuOpen ? 'is-open' : ''}"><button class="auth-account" type="button" data-action="toggle-account-menu" aria-label="帳戶選單" aria-expanded="${accountMenuOpen}" title="帳戶選單">${authUser.photoURL ? `<img src="${escapeHTML(authUser.photoURL)}" alt="">` : `<span class="auth-avatar-fallback">${escapeHTML((authUser.displayName || authUser.email || 'G').slice(0,1).toUpperCase())}</span>`}</button>${accountMenu}</div><button class="icon-button topbar-icon mobile-menu-button" data-action="toggle-drawer" aria-label="開啟選單" aria-expanded="${drawerOpen}" title="選單">${icon('menu')}</button></div></div></header>
       <main class="main-content">${renderPage(route, data, context())}</main>
     </div>
     ${drawerOpen ? renderDrawer() : ''}
@@ -736,10 +773,12 @@ async function handleAction(action, element) {
       break;
     case 'google-sign-out':
       if (!authClient || !authUser) break;
+      accountMenuOpen = false; render();
       try { await authClient.signOutUser(); }
       catch (error) { toast(authClient.authErrorMessage(error), 'error'); }
       break;
     case 'cloud-enable-sync': await enableCloudDataForCurrentUser(); break;
+    case 'cloud-mode': await setCloudMode(element.dataset.mode); break;
     case 'auth-retry': location.reload(); break;
     case 'ai-open': openAIPanel({ route: element.dataset.aiRoute || route, taskId: element.dataset.aiRoute === 'task' ? id : '', habitId: element.dataset.aiRoute === 'habit' ? id : '' }); break;
     case 'ai-prompt': await sendAIMessage(element.dataset.prompt); break;
@@ -1170,10 +1209,21 @@ async function initializeAuthentication() {
       renderedLayoutDevice = detectLayoutDevice();
       homeLayout = loadHomeLayout();
       homeEditMode = false;
+      if (localStorage.getItem(cloudModeKey(user.uid)) === 'local') {
+        cloudClient?.stopCloudSync();
+        cloudSyncStatus = 'local-only';
+        render();
+        return;
+      }
       cloudSyncStatus = 'syncing';
       render();
       try {
         cloudClient ||= await import('./cloud-store.js');
+        if (authUser?.uid !== user.uid || localStorage.getItem(cloudModeKey(user.uid)) === 'local') {
+          cloudClient.stopCloudSync();
+          if (authUser?.uid === user.uid) { cloudSyncStatus = 'local-only'; render(); }
+          return;
+        }
         const result = await cloudClient.startCloudSync(user.uid, status => {
           if (authUser?.uid !== user.uid) return;
           cloudSyncStatus = status;
